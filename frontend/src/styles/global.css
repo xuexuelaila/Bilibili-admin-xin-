@@ -1,0 +1,22 @@
+:root {
+  --bg: #f6f3ed;
+  --bg-soft: #fefcf9;
+  --panel: #ffffff;
+  --text: #1d242b;
+  --muted: #6a7077;
+  --border: #e4e1da;
+  --accent: #d46f4d;
+  --accent-soft: #f4e1d9;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--font-body); background: radial-gradient(circle at top, #fefcf9, #f6f3ed); color: var(--text); }
+
+.page { display: grid; gap: 20px; }
+.btn { border: 1px solid var(--border); border-radius: 12px; padding: 8px 14px; background: transparent; cursor: pointer; font-family: var(--font-body); text-decoration: none; color: var(--text); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+.btn.ghost { background: var(--bg-soft); }
+
+h1, h2, h3 { font-family: var(--font-display); }

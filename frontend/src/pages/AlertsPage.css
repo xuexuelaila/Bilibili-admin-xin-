@@ -1,0 +1,8 @@
+.alert-list { display: grid; gap: 12px; }
+.alert-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.alert-card.read { opacity: 0.6; }
+.alert-card h3 { margin: 0 0 6px; font-size: 16px; }
+.alert-card p { margin: 0; color: var(--muted); }
+.alert-card .meta { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.actions { display: flex; gap: 12px; align-items: center; }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }

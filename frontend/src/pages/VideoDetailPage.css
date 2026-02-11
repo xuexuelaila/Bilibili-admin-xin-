@@ -1,0 +1,7 @@
+.detail-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: grid; gap: 10px; }
+.panel img { width: 100%; border-radius: 12px; }
+.panel textarea { min-height: 160px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px; color: var(--text); }
+.stats { display: flex; flex-wrap: wrap; gap: 10px; }
+.tags { display: flex; gap: 8px; }
+.actions { display: flex; gap: 10px; }

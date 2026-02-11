@@ -1,0 +1,14 @@
+.trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.trend-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: grid; gap: 12px; }
+.trend-card h3 { margin: 0; }
+.bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(24px, 1fr)); gap: 8px; align-items: end; height: 160px; }
+.bar-item { display: grid; gap: 6px; justify-items: center; font-size: 11px; color: var(--muted); }
+.bar { width: 100%; min-height: 6px; background: #c9d6e2; border-radius: 6px 6px 2px 2px; }
+.bar.hot { background: #f2c04d; }
+.bar.low { background: #8dc6ff; }
+.rank-card { margin-top: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+.rank-table { display: grid; gap: 8px; }
+.rank-header, .rank-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 10px; padding: 10px 12px; border-radius: 12px; }
+.rank-header { background: var(--bg-soft); color: var(--muted); font-size: 12px; }
+.rank-row { border: 1px solid var(--border); }
+@media (max-width: 700px) { .rank-header, .rank-row { grid-template-columns: 1fr 1fr; } }

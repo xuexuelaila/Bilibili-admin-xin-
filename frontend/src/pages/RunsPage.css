@@ -1,0 +1,12 @@
+.runs-table { display: grid; gap: 8px; }
+.runs-header, .runs-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 12px 16px; border-radius: 12px; }
+.runs-header { background: var(--panel); border: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.runs-row { background: var(--panel); border: 1px solid var(--border); }
+.status.success { color: #0e7256; }
+.status.partial { color: #8b5b00; }
+.status.failed { color: #8f231c; }
+.runs-block { display: grid; gap: 8px; }
+.run-error { background: var(--panel); border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; }
+.run-error summary { cursor: pointer; color: var(--muted); }
+.run-error pre { white-space: pre-wrap; background: var(--bg-soft); padding: 10px; border-radius: 10px; overflow-x: auto; }
+.error-summary { margin: 6px 0; color: #8f231c; }
