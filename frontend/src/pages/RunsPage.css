@@ -6,6 +6,7 @@
 .status.partial { color: #8b5b00; }
 .status.failed { color: #8f231c; }
 .runs-block { display: grid; gap: 8px; }
+.run-actions { display: flex; gap: 8px; }
 .run-error { background: var(--panel); border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; }
 .run-error summary { cursor: pointer; color: var(--muted); }
 .run-error pre { white-space: pre-wrap; background: var(--bg-soft); padding: 10px; border-radius: 10px; overflow-x: auto; }

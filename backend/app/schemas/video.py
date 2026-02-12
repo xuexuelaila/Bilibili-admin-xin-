@@ -15,6 +15,7 @@ class VideoOut(BaseModel):
     stats: dict[str, Any]
     tags: dict[str, Any]
     source_task_ids: list[str]
+    source_task_names: list[str]
     process_status: str
     note: str | None
 

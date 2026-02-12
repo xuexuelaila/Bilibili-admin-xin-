@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
+import Pagination from '../components/Pagination'
+import '../components/Pagination.css'
+import Empty from '../components/Empty'
 import './TasksPage.css'
 
 interface Task {
@@ -11,6 +14,17 @@ interface Task {
   status: string
   consecutive_failures: number
   updated_at: string
+}
+
+interface TaskSummary {
+  task_id: string
+  today_new: number
+  today_basic: number
+  today_low: number
+  success_rate_7d: number
+  last_run_time: string | null
+  last_run_status: string | null
+  last_run_duration_ms: number | null
 }
 
 interface Metrics {
@@ -47,19 +61,45 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [preview, setPreview] = useState<PreviewResult | null>(null)
+  const [status, setStatus] = useState('')
+  const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [summaryMap, setSummaryMap] = useState<Record<string, TaskSummary>>({})
 
   const load = async () => {
+    setLoading(true)
     const [taskRes, metricsRes] = await Promise.all([
-      api.get('/api/tasks?page=1&page_size=50'),
+      api.get(`/api/tasks?page=${page}&page_size=${pageSize}&status=${status}&q=${encodeURIComponent(q)}`),
       api.get('/api/metrics/overview'),
     ])
     setTasks(taskRes.data.items)
+    setTotal(taskRes.data.total || 0)
     setMetrics(metricsRes.data)
+    const ids = (taskRes.data.items || []).map((t: Task) => t.id).join(',')
+    if (ids) {
+      const summaryRes = await api.get(`/api/tasks/summary?ids=${ids}`)
+      const map: Record<string, TaskSummary> = {}
+      ;(summaryRes.data.items || []).forEach((item: TaskSummary) => {
+        map[item.task_id] = item
+      })
+      setSummaryMap(map)
+    } else {
+      setSummaryMap({})
+    }
+    setLoading(false)
   }
 
   useEffect(() => {
     load()
-  }, [])
+  }, [page, pageSize, status])
+
+  const search = () => {
+    setPage(1)
+    load()
+  }
 
   const runNow = async (id: string) => {
     await api.post(`/api/tasks/${id}/run`)
@@ -79,6 +119,18 @@ export default function TasksPage() {
       counts: res.data.counts,
       samples: res.data.samples || [],
     })
+  }
+
+  const cloneTask = async (task: Task) => {
+    await api.post(`/api/tasks/${task.id}/clone`)
+    await load()
+  }
+
+  const deleteTask = async (task: Task) => {
+    const confirmName = window.prompt(`请输入任务名以确认删除：${task.name}`)
+    if (confirmName !== task.name) return
+    await api.delete(`/api/tasks/${task.id}`)
+    await load()
   }
 
   return (
@@ -121,7 +173,19 @@ export default function TasksPage() {
       )}
 
       <section className='task-list'>
-        {tasks.map((task) => (
+        <div className='task-filters'>
+          <input placeholder='搜索任务名/关键词' value={q} onChange={(e) => setQ(e.target.value)} />
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value=''>全部状态</option>
+            <option value='enabled'>启用</option>
+            <option value='disabled'>停用</option>
+          </select>
+          <button className='btn ghost' onClick={search}>搜索</button>
+        </div>
+
+        {loading && <Empty label='加载中...' />}
+        {!loading && tasks.length === 0 && <Empty label='暂无任务' />}
+        {!loading && tasks.map((task) => (
           <div key={task.id} className='task-card'>
             <div className='task-top'>
               <div>
@@ -130,9 +194,17 @@ export default function TasksPage() {
               </div>
               <span className={`pill ${task.status}`}>{task.status === 'enabled' ? '启用' : '停用'}</span>
             </div>
+            <div className='task-metrics'>
+              <span>今日新增 {summaryMap[task.id]?.today_new ?? 0}</span>
+              <span>今日爆款 {summaryMap[task.id]?.today_basic ?? 0}</span>
+              <span>低粉爆款 {summaryMap[task.id]?.today_low ?? 0}</span>
+              <span>近7天成功率 {summaryMap[task.id]?.success_rate_7d ?? 0}%</span>
+            </div>
             <div className='task-meta'>
               <span>连续失败：{task.consecutive_failures}</span>
               <span>更新：{dayjs(task.updated_at).format('MM-DD HH:mm')}</span>
+              <span>最近运行：{summaryMap[task.id]?.last_run_time ? dayjs(summaryMap[task.id]?.last_run_time).format('MM-DD HH:mm') : '-'}</span>
+              <span>状态：{summaryMap[task.id]?.last_run_status || '-'}</span>
             </div>
             <div className='task-actions'>
               <button className='btn ghost' onClick={() => runNow(task.id)}>立即运行</button>
@@ -140,10 +212,19 @@ export default function TasksPage() {
               <Link className='btn ghost' to={`/tasks/${task.id}/edit`}>编辑</Link>
               <Link className='btn ghost' to={`/tasks/${task.id}/runs`}>运行记录</Link>
               <button className='btn ghost' onClick={() => toggle(task)}>{task.status === 'enabled' ? '停用' : '启用'}</button>
+              <button className='btn ghost' onClick={() => cloneTask(task)}>复制</button>
+              <button className='btn ghost danger' onClick={() => deleteTask(task)}>删除</button>
             </div>
           </div>
         ))}
       </section>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       {preview && (
         <section className='preview-panel'>

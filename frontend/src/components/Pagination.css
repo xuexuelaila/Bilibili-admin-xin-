@@ -1,0 +1,6 @@
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.pagination-info { display: flex; gap: 12px; color: var(--muted); font-size: 12px; }
+.pagination-actions { display: flex; gap: 8px; align-items: center; }
+.pagination-actions select { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; color: var(--text); }
+.pagination-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 700px) { .pagination { flex-direction: column; align-items: flex-start; } }

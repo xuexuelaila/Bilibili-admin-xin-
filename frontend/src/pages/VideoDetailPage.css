@@ -5,3 +5,5 @@
 .stats { display: flex; flex-wrap: wrap; gap: 10px; }
 .tags { display: flex; gap: 8px; }
 .actions { display: flex; gap: 10px; }
+.tag-reasons { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+.tag-reasons p { margin: 0; }

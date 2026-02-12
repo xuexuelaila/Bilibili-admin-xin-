@@ -1,9 +1,15 @@
 import { useMemo, useState } from 'react'
 
 interface ExportFilters {
+  bvids?: string
   tag?: string
   process_status?: string
   sort?: string
+  task_id?: string
+  publish_from?: string
+  publish_to?: string
+  fetch_from?: string
+  fetch_to?: string
   min_views?: string
   min_fav?: string
   min_coin?: string
@@ -33,10 +39,22 @@ const FIELD_OPTIONS = [
   { key: 'low_fan_hot', label: '低粉爆款' },
   { key: 'process_status', label: '处理状态' },
   { key: 'task_ids', label: '任务ID' },
+  { key: 'task_names', label: '任务名称' },
+  { key: 'export_status', label: '导出状态' },
+  { key: 'export_reason', label: '失败原因' },
 ]
 
-export default function ExportPanel({ filters, baseUrl }: { filters: ExportFilters; baseUrl: string }) {
+export default function ExportPanel({
+  filters,
+  baseUrl,
+  label = '导出 CSV',
+}: {
+  filters: ExportFilters
+  baseUrl: string
+  label?: string
+}) {
   const [selected, setSelected] = useState<string[]>(FIELD_OPTIONS.map((f) => f.key))
+  const [includeMissing, setIncludeMissing] = useState(false)
 
   const toggle = (key: string) => {
     setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -50,12 +68,15 @@ export default function ExportPanel({ filters, baseUrl }: { filters: ExportFilte
     if (selected.length > 0) {
       params.set('fields', selected.join(','))
     }
+    if (includeMissing) {
+      params.set('include_missing', '1')
+    }
     return `${baseUrl}/api/videos/export?${params.toString()}`
-  }, [filters, baseUrl, selected])
+  }, [filters, baseUrl, selected, includeMissing])
 
   return (
     <div className='export-panel'>
-      <a className='btn ghost' href={exportUrl}>导出 CSV</a>
+      <a className='btn ghost' href={exportUrl}>{label}</a>
       <details className='export-fields'>
         <summary>字段配置</summary>
         <div className='field-grid'>
@@ -70,6 +91,10 @@ export default function ExportPanel({ filters, baseUrl }: { filters: ExportFilte
             </label>
           ))}
         </div>
+        <label className='include-missing'>
+          <input type='checkbox' checked={includeMissing} onChange={(e) => setIncludeMissing(e.target.checked)} />
+          包含导出失败列表
+        </label>
       </details>
     </div>
   )

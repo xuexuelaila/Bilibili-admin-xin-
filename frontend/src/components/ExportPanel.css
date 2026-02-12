@@ -3,3 +3,4 @@
 .export-fields summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .field-grid { margin-top: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 8px; }
 .field-grid label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.include-missing { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }

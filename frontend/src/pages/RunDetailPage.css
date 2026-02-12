@@ -1,0 +1,4 @@
+.detail-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 12px; display: grid; gap: 8px; }
+.detail-panel h3 { margin: 0; }
+.detail-panel pre { white-space: pre-wrap; background: var(--bg-soft); padding: 10px; border-radius: 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; color: var(--muted); }

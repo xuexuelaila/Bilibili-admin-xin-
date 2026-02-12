@@ -45,6 +45,7 @@ class TaskRunner:
             "basic_hot": 0,
             "low_fan_hot": 0,
             "failed_items": 0,
+            "excluded": 0,
         }
         error_samples: list[dict[str, str]] = []
 
@@ -74,6 +75,16 @@ class TaskRunner:
                     record_error("search", str(exc), {"keyword": keyword})
 
             counts["fetched"] = len(candidates)
+            exclude_words = [w.strip().lower() for w in (task.exclude_words or []) if w and w.strip()]
+            if exclude_words:
+                filtered: list[dict[str, Any]] = []
+                for item in candidates:
+                    title = (item.get("title") or "").lower()
+                    if title and any(word in title for word in exclude_words):
+                        counts["excluded"] += 1
+                        continue
+                    filtered.append(item)
+                candidates = filtered
             dedup_map: dict[str, dict[str, Any]] = {}
             for item in candidates:
                 bvid = item.get("bvid") or ""

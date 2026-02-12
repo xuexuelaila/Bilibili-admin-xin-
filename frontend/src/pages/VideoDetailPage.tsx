@@ -75,10 +75,17 @@ export default function VideoDetailPage() {
           </div>
           <p>发布时间：{video.publish_time ? dayjs(video.publish_time).format('YYYY-MM-DD') : '-'}</p>
           <p>抓取时间：{dayjs(video.fetch_time).format('YYYY-MM-DD HH:mm')}</p>
+          <p>来源任务：{(video.source_task_names || []).length > 0 ? video.source_task_names.join(' / ') : '-'}</p>
           <div className='tags'>
             {video.tags.basic_hot.is_hit && <span className='pill hot'>爆款</span>}
             {video.tags.low_fan_hot.is_hit && <span className='pill low'>低粉爆款</span>}
           </div>
+          {(video.tags.basic_hot.reason || video.tags.low_fan_hot.reason) && (
+            <div className='tag-reasons'>
+              {video.tags.basic_hot.reason && <p>爆款命中原因：{video.tags.basic_hot.reason}</p>}
+              {video.tags.low_fan_hot.reason && <p>低粉爆款命中原因：{video.tags.low_fan_hot.reason}</p>}
+            </div>
+          )}
         </div>
         <div className='panel'>
           <h3>字幕</h3>

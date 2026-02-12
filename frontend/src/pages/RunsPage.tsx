@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
+import Pagination from '../components/Pagination'
+import '../components/Pagination.css'
+import Empty from '../components/Empty'
 import './RunsPage.css'
 
 interface Run {
@@ -17,12 +20,21 @@ interface Run {
 export default function RunsPage() {
   const { id } = useParams()
   const [runs, setRuns] = useState<Run[]>([])
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (id) {
-      api.get(`/api/tasks/${id}/runs`).then((res) => setRuns(res.data.items))
+      setLoading(true)
+      api.get(`/api/tasks/${id}/runs?page=${page}&page_size=${pageSize}`).then((res) => {
+        setRuns(res.data.items)
+        setTotal(res.data.total || 0)
+        setLoading(false)
+      })
     }
-  }, [id])
+  }, [id, page, pageSize])
 
   return (
     <div className='page'>
@@ -32,7 +44,10 @@ export default function RunsPage() {
           <p>任务：{id}</p>
         </div>
       </header>
-      <div className='runs-table'>
+      {loading && <Empty label='加载中...' />}
+      {!loading && runs.length === 0 && <Empty label='暂无运行记录' />}
+      {!loading && (
+        <div className='runs-table'>
         <div className='runs-header'>
           <span>开始时间</span>
           <span>耗时</span>
@@ -49,6 +64,9 @@ export default function RunsPage() {
               <span>{run.counts?.basic_hot || 0}/{run.counts?.low_fan_hot || 0}</span>
               <span className={`status ${run.status}`}>{run.status}</span>
             </div>
+            <div className='run-actions'>
+              <a className='btn ghost' href={`/runs/${run.id}`}>查看详情</a>
+            </div>
             {(run.error_summary || run.error_detail) && (
               <details className='run-error'>
                 <summary>错误详情</summary>
@@ -60,7 +78,15 @@ export default function RunsPage() {
             )}
           </div>
         ))}
-      </div>
+        </div>
+      )}
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </div>
   )
 }

@@ -1,13 +1,17 @@
 import csv
 import io
+import os
+import zipfile
+from urllib.parse import urlparse
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+import httpx
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Video, TaskVideo, Subtitle
+from app.models import Video, TaskVideo, Subtitle, Task
 from app.schemas.video import VideoOut
 from app.schemas.subtitle import SubtitleOut
 from app.schemas.pagination import Page
@@ -106,13 +110,23 @@ def list_videos(
         .all()
     )
 
-    items = [video_to_out(v) for v in rows]
+    task_ids = set()
+    for v in rows:
+        for tid in v.source_task_ids or []:
+            task_ids.add(tid)
+    task_map = {}
+    if task_ids:
+        task_rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
+        task_map = {t.id: t.name for t in task_rows}
+
+    items = [video_to_out(v, task_map) for v in rows]
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
 @router.get("/export")
 def export_csv(
     db: Session = Depends(get_db),
+    bvids: str | None = None,
     task_id: str | None = None,
     tag: str | None = None,
     process_status: str | None = None,
@@ -131,8 +145,13 @@ def export_csv(
     fan_max: int | None = None,
     sort: str | None = None,
     fields: str | None = None,
+    include_missing: bool = False,
 ):
     query = select(Video)
+    if bvids:
+        bvid_list = [b.strip() for b in bvids.split(',') if b.strip()]
+        if bvid_list:
+            query = query.where(Video.bvid.in_(bvid_list))
     if task_id:
         query = query.join(TaskVideo).where(TaskVideo.task_id == task_id)
     if tag == "basic_hot":
@@ -188,6 +207,27 @@ def export_csv(
         query = query.order_by(Video.fetch_time.desc())
     rows = db.execute(query).scalars().all()
 
+    bvid_list: list[str] = []
+    missing: set[str] = set()
+    if bvids:
+        bvid_list = [b.strip() for b in bvids.split(",") if b.strip()]
+        found = {v.bvid for v in rows}
+        missing = set(bvid_list) - found
+
+    task_ids = set()
+    for v in rows:
+        for tid in v.source_task_ids or []:
+            task_ids.add(tid)
+    task_map = {}
+    if task_ids:
+        task_rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
+        task_map = {t.id: t.name for t in task_rows}
+
+    def task_names(v: Video) -> str:
+        names = [task_map.get(tid, "") for tid in (v.source_task_ids or [])]
+        names = [n for n in names if n]
+        return ",".join(names)
+
     field_map = {
         "bvid": lambda v: v.bvid,
         "video_url": lambda v: f"https://www.bilibili.com/video/{v.bvid}",
@@ -207,6 +247,9 @@ def export_csv(
         "low_fan_hot": lambda v: v.low_fan_hot,
         "process_status": lambda v: v.process_status,
         "task_ids": lambda v: ",".join(v.source_task_ids or []),
+        "task_names": task_names,
+        "export_status": lambda v: "成功",
+        "export_reason": lambda v: "",
     }
     field_labels = {
         "bvid": "BVID",
@@ -227,6 +270,9 @@ def export_csv(
         "low_fan_hot": "低粉爆款",
         "process_status": "处理状态",
         "task_ids": "任务ID",
+        "task_names": "任务名称",
+        "export_status": "导出状态",
+        "export_reason": "失败原因",
     }
     if fields:
         selected = [f.strip() for f in fields.split(",") if f.strip()]
@@ -240,6 +286,14 @@ def export_csv(
     for v in rows:
         writer.writerow([field_map[f](v) for f in selected])
 
+    if include_missing and missing:
+        for bvid in sorted(missing):
+            row = {}
+            row["bvid"] = bvid
+            row["export_status"] = "失败"
+            row["export_reason"] = "not_found"
+            writer.writerow([row.get(f, "") for f in selected])
+
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -248,13 +302,155 @@ def export_csv(
     )
 
 
+@router.post("/process_status/batch")
+def batch_update_status(payload: dict, db: Session = Depends(get_db)):
+    bvids = payload.get("bvids") or []
+    status = payload.get("process_status")
+    if status not in {"todo", "done"}:
+        raise HTTPException(status_code=400, detail="invalid status")
+    if not isinstance(bvids, list) or not bvids:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    rows = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    for v in rows:
+        v.process_status = status
+    db.commit()
+    return {"ok": True, "updated": len(rows)}
+
+
+@router.post("/subtitle/extract/batch")
+def batch_extract_subtitles(payload: dict, db: Session = Depends(get_db)):
+    bvids = payload.get("bvids") or []
+    if not isinstance(bvids, list) or not bvids:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    if settings.bili_client == "crawler":
+        setting = get_or_create_settings(db)
+        client = CrawlerBiliClient(
+            rate_limit_per_sec=setting.rate_limit_per_sec,
+            retry_times=setting.retry_times,
+            timeout_seconds=setting.timeout_seconds,
+        )
+    else:
+        client = MockBiliClient()
+
+    updated = 0
+    failed = []
+    for bvid in bvids:
+        subtitle = db.get(Subtitle, bvid)
+        if not subtitle:
+            subtitle = Subtitle(bvid=bvid, status="extracting")
+        subtitle.status = "extracting"
+        db.add(subtitle)
+        db.commit()
+
+        text = client.get_subtitle(bvid)
+        if text:
+            subtitle.status = "done"
+            subtitle.text = text
+            subtitle.error = None
+            updated += 1
+        else:
+            subtitle.status = "failed"
+            subtitle.error = "subtitle not found"
+            failed.append({"bvid": bvid, "reason": "subtitle not found"})
+        db.add(subtitle)
+        db.commit()
+
+    return {"ok": True, "updated": updated, "failed": failed, "total": len(bvids)}
+
+
+@router.get("/cover/download/batch")
+def batch_cover_download(bvids: str, db: Session = Depends(get_db)):
+    bvid_list = [b.strip() for b in bvids.split(",") if b.strip()]
+    if not bvid_list:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    videos = db.execute(select(Video).where(Video.bvid.in_(bvid_list))).scalars().all()
+    if not videos:
+        raise HTTPException(status_code=404, detail="videos not found")
+
+    task_ids = set()
+    for v in videos:
+        for tid in v.source_task_ids or []:
+            task_ids.add(tid)
+    task_map = {}
+    if task_ids:
+        rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
+        task_map = {t.id: t.name for t in rows}
+
+    buffer = io.BytesIO()
+    failed_rows = []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for v in videos:
+            if not v.cover_url:
+                failed_rows.append([v.bvid, "missing_cover_url"])
+                continue
+            url = v.cover_url
+            if url.startswith("//"):
+                url = "https:" + url
+            ext = _infer_ext(url)
+            folder = _pick_task_folder(v.source_task_ids or [], task_map)
+            filename = f"{folder}/{v.bvid}{ext}"
+            try:
+                res = httpx.get(url, timeout=10)
+                if res.status_code == 200:
+                    zf.writestr(filename, res.content)
+                else:
+                    failed_rows.append([v.bvid, f"download_failed:{res.status_code}"])
+            except Exception:
+                failed_rows.append([v.bvid, "download_error"])
+
+        if failed_rows:
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["bvid", "reason"])
+            for row in failed_rows:
+                writer.writerow(row)
+            zf.writestr("failures.csv", output.getvalue())
+
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=covers.zip"},
+    )
+
+
+def _infer_ext(url: str) -> str:
+    path = urlparse(url).path
+    ext = os.path.splitext(path)[1]
+    if not ext:
+        return ".jpg"
+    return ext
+
+
+def _pick_task_folder(task_ids: list[str], task_map: dict[str, str]) -> str:
+    if not task_ids:
+        return "unassigned"
+    if len(task_ids) == 1:
+        name = task_map.get(task_ids[0], "unknown")
+        return _safe_folder(name)
+    return "multi"
+
+
+def _safe_folder(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name.strip())
+    return cleaned or "unknown"
+
+
 @router.get("/{bvid}", response_model=VideoOut)
 
 def get_video(bvid: str, db: Session = Depends(get_db)):
     video = db.get(Video, bvid)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    return video_to_out(video)
+    task_ids = set(video.source_task_ids or [])
+    task_map = {}
+    if task_ids:
+        task_rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
+        task_map = {t.id: t.name for t in task_rows}
+    return video_to_out(video, task_map)
 
 
 @router.post("/{bvid}/process_status")
@@ -336,10 +532,26 @@ def download_cover(bvid: str, db: Session = Depends(get_db)):
     video = db.get(Video, bvid)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    return {"cover_url": video.cover_url}
+    if not video.cover_url:
+        raise HTTPException(status_code=404, detail="cover not found")
+    url = video.cover_url
+    if url.startswith("//"):
+        url = "https:" + url
+    try:
+        res = httpx.get(url, timeout=10)
+        if res.status_code != 200:
+            raise HTTPException(status_code=502, detail="cover download failed")
+        return StreamingResponse(
+            io.BytesIO(res.content),
+            media_type=res.headers.get("content-type", "image/jpeg"),
+            headers={"Content-Disposition": f"attachment; filename={video.bvid}.jpg"},
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="cover download failed")
 
 
-def video_to_out(video: Video) -> VideoOut:
+def video_to_out(video: Video, task_map: dict[str, str] | None = None) -> VideoOut:
+    task_map = task_map or {}
     stats = {
         "views": video.views,
         "like": video.like,
@@ -368,6 +580,7 @@ def video_to_out(video: Video) -> VideoOut:
         stats=stats,
         tags=tags,
         source_task_ids=video.source_task_ids or [],
+        source_task_names=[task_map.get(tid, "") for tid in (video.source_task_ids or []) if task_map.get(tid)],
         process_status=video.process_status,
         note=video.note,
     )
