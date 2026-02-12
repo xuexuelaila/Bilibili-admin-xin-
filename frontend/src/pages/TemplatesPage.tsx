@@ -28,6 +28,9 @@ const DEFAULT_FORM = {
   fav_fan_ratio: 0.02,
 }
 
+const normalizeIndustry = (value: string) => (value === '其他' ? 'other' : value)
+const renderIndustry = (value: string) => (value === 'other' ? '其他' : value)
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<TemplateItem[]>([])
   const [form, setForm] = useState({ ...DEFAULT_FORM })
@@ -47,7 +50,7 @@ export default function TemplatesPage() {
     setForm({
       id: tpl.id,
       name: tpl.name,
-      industry: tpl.industry,
+      industry: normalizeIndustry(tpl.industry),
       strength: tpl.strength,
       basic_views: tpl.rules?.basic_hot?.thresholds?.views ?? DEFAULT_FORM.basic_views,
       basic_fav: tpl.rules?.basic_hot?.thresholds?.fav ?? DEFAULT_FORM.basic_fav,
@@ -136,7 +139,7 @@ export default function TemplatesPage() {
             <select value={form.industry} onChange={(e) => update('industry', e.target.value)}>
               <option value='家电'>家电</option>
               <option value='3C'>3C</option>
-              <option value='其他'>其他</option>
+              <option value='other'>其他</option>
             </select>
           </label>
           <label>
@@ -184,7 +187,7 @@ export default function TemplatesPage() {
           <div key={tpl.id} className='template-card'>
             <div>
               <h4>{tpl.name}</h4>
-              <p>{tpl.industry} · {tpl.strength}</p>
+              <p>{renderIndustry(tpl.industry)} · {tpl.strength}</p>
             </div>
             <button className='btn ghost' onClick={() => selectTemplate(tpl)}>编辑</button>
           </div>

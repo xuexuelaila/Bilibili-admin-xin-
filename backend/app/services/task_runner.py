@@ -297,6 +297,12 @@ class TaskRunner:
         video.low_fan_hot = tags["low_fan_hot"]["is_hit"]
         video.low_fan_hot_reason = tags["low_fan_hot"]["reason"]
 
+        task_labels = [t.strip() for t in (task.tags or []) if t and t.strip()]
+        if task_labels:
+            existing = video.tags or []
+            merged = list(dict.fromkeys(existing + task_labels))
+            video.tags = merged
+
         if video.basic_hot:
             counts["basic_hot"] += 1
         if video.low_fan_hot:

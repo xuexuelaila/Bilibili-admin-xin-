@@ -41,6 +41,8 @@ class Video(Base):
     process_status = Column(String(20), nullable=False, default="todo")
     note = Column(Text, nullable=True)
 
+    tags = Column(JSON, nullable=False, default=list)
+
     source_task_ids = Column(JSON, nullable=False, default=list)
 
     task_videos = relationship("TaskVideo", back_populates="video", cascade="all, delete-orphan")

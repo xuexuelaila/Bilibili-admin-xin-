@@ -7,6 +7,7 @@ import '../components/ExportPanel.css'
 import Pagination from '../components/Pagination'
 import '../components/Pagination.css'
 import Empty from '../components/Empty'
+import TagInput from '../components/TagInput'
 import './VideosPage.css'
 
 interface Video {
@@ -19,64 +20,40 @@ interface Video {
   cover_url: string | null
   stats: { views: number; fav: number; coin: number; reply: number; fav_rate: number; coin_rate: number; reply_rate: number; fav_fan_ratio: number }
   tags: { basic_hot: { is_hit: boolean }; low_fan_hot: { is_hit: boolean } }
+  labels: string[]
   process_status: string
 }
 
-interface TaskOption {
-  id: string
-  name: string
+const formatCount = (value: number) => {
+  if (value >= 10000) {
+    const num = value / 10000
+    return `${num.toFixed(num >= 100 ? 0 : 1)}w`
+  }
+  return String(value)
 }
 
 export default function VideosPage() {
   const [videos, setVideos] = useState<Video[]>([])
-  const [tasks, setTasks] = useState<TaskOption[]>([])
-  const [taskId, setTaskId] = useState('')
-  const [tag, setTag] = useState('')
-  const [processStatus, setProcessStatus] = useState('')
-  const [sort, setSort] = useState('')
+  const [labels, setLabels] = useState<string[]>([])
+  const [tagOptions, setTagOptions] = useState<string[]>([])
   const [publishFrom, setPublishFrom] = useState('')
   const [publishTo, setPublishTo] = useState('')
-  const [fetchFrom, setFetchFrom] = useState('')
-  const [fetchTo, setFetchTo] = useState('')
-  const [minViews, setMinViews] = useState('')
-  const [minFav, setMinFav] = useState('')
-  const [minCoin, setMinCoin] = useState('')
-  const [minReply, setMinReply] = useState('')
-  const [minFavRate, setMinFavRate] = useState('')
-  const [minCoinRate, setMinCoinRate] = useState('')
-  const [minReplyRate, setMinReplyRate] = useState('')
-  const [minFavFanRatio, setMinFavFanRatio] = useState('')
+  const [quickDays, setQuickDays] = useState<number | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+  const [coverError, setCoverError] = useState<Record<string, boolean>>({})
+  const [subtitleMenu, setSubtitleMenu] = useState<string | null>(null)
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
-  const loadTasks = async () => {
-    const res = await api.get('/api/tasks?page=1&page_size=200')
-    setTasks(res.data.items || [])
-  }
 
   const load = async () => {
     setLoading(true)
     const params = new URLSearchParams()
-    if (taskId) params.set('task_id', taskId)
-    if (tag) params.set('tag', tag)
-    if (processStatus) params.set('process_status', processStatus)
-    if (sort) params.set('sort', sort)
+    if (labels.length > 0) params.set('labels', labels.join(','))
     if (publishFrom) params.set('publish_from', publishFrom)
     if (publishTo) params.set('publish_to', publishTo)
-    if (fetchFrom) params.set('fetch_from', fetchFrom)
-    if (fetchTo) params.set('fetch_to', fetchTo)
-    if (minViews) params.set('min_views', minViews)
-    if (minFav) params.set('min_fav', minFav)
-    if (minCoin) params.set('min_coin', minCoin)
-    if (minReply) params.set('min_reply', minReply)
-    if (minFavRate) params.set('min_fav_rate', minFavRate)
-    if (minCoinRate) params.set('min_coin_rate', minCoinRate)
-    if (minReplyRate) params.set('min_reply_rate', minReplyRate)
-    if (minFavFanRatio) params.set('min_fav_fan_ratio', minFavFanRatio)
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
     const res = await api.get(`/api/videos?${params.toString()}`)
@@ -87,19 +64,23 @@ export default function VideosPage() {
 
   useEffect(() => {
     load()
-  }, [taskId, tag, processStatus, sort, publishFrom, publishTo, fetchFrom, fetchTo, minViews, minFav, minCoin, minReply, minFavRate, minCoinRate, minReplyRate, minFavFanRatio, page, pageSize])
+  }, [labels, publishFrom, publishTo, page, pageSize])
 
   useEffect(() => {
-    loadTasks()
+    api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
   }, [])
 
   useEffect(() => {
     setPage(1)
-  }, [taskId, tag, processStatus, sort, publishFrom, publishTo, fetchFrom, fetchTo, minViews, minFav, minCoin, minReply, minFavRate, minCoinRate, minReplyRate, minFavFanRatio])
+  }, [labels, publishFrom, publishTo])
 
   useEffect(() => {
     setSelected([])
-  }, [taskId, tag, processStatus, sort, publishFrom, publishTo, fetchFrom, fetchTo, minViews, minFav, minCoin, minReply, minFavRate, minCoinRate, minReplyRate, minFavFanRatio, page, pageSize])
+  }, [labels, publishFrom, publishTo, page, pageSize])
+
+  useEffect(() => {
+    setCoverError({})
+  }, [videos])
 
   const allSelected = videos.length > 0 && selected.length === videos.length
 
@@ -139,9 +120,83 @@ export default function VideosPage() {
     window.open(url, '_blank')
   }
 
-  const applyQuick = (nextTag: string, nextStatus: string) => {
-    setTag(nextTag)
-    setProcessStatus(nextStatus)
+  const ensureSubtitleText = async (bvid: string) => {
+    try {
+      const res = await api.get(`/api/videos/${bvid}/subtitle`)
+      return res.data?.text || ''
+    } catch {
+      const res = await api.post(`/api/videos/${bvid}/subtitle/extract`)
+      if (res.data?.status === 'failed') {
+        throw new Error('字幕提取失败')
+      }
+      const sub = await api.get(`/api/videos/${bvid}/subtitle`)
+      return sub.data?.text || ''
+    }
+  }
+
+  const copySubtitle = async (bvid: string) => {
+    try {
+      const text = await ensureSubtitleText(bvid)
+      if (!text) {
+        window.alert('未获取到字幕')
+        return
+      }
+      await navigator.clipboard.writeText(text)
+      window.alert('字幕已复制')
+    } catch {
+      window.alert('字幕提取失败或不可用')
+    }
+  }
+
+  const downloadSubtitle = async (bvid: string) => {
+    try {
+      const text = await ensureSubtitleText(bvid)
+      if (!text) {
+        window.alert('未获取到字幕')
+        return
+      }
+      const blob = new Blob([text], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${bvid}.txt`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      window.alert('字幕提取失败或不可用')
+    }
+  }
+
+  const downloadCover = (bvid: string) => {
+    const url = `${baseUrl}/api/videos/${bvid}/cover/download`
+    window.open(url, '_blank')
+  }
+
+  const applyQuickDays = (days: number) => {
+    const from = dayjs().subtract(days - 1, 'day').format('YYYY-MM-DD')
+    const to = dayjs().format('YYYY-MM-DD')
+    setQuickDays(days)
+    setPublishFrom(from)
+    setPublishTo(to)
+  }
+
+  const handlePublishFrom = (value: string) => {
+    setQuickDays(null)
+    setPublishFrom(value)
+  }
+
+  const handlePublishTo = (value: string) => {
+    setQuickDays(null)
+    setPublishTo(value)
+  }
+
+  const canClear = labels.length > 0 || !!publishFrom || !!publishTo || quickDays !== null
+
+  const clearAll = () => {
+    setLabels([])
+    setPublishFrom('')
+    setPublishTo('')
+    setQuickDays(null)
   }
 
   return (
@@ -149,109 +204,49 @@ export default function VideosPage() {
       <header className='page-header'>
         <div>
           <h1>视频库</h1>
-          <p>按爆款标签、指标区间快速筛选。</p>
+          <p>按标签与发布时间快速筛选。</p>
         </div>
         <ExportPanel
           baseUrl={baseUrl}
           label='导出筛选'
           filters={{
-            task_id: taskId,
-            tag,
-            process_status: processStatus,
-            sort,
+            labels: labels.join(','),
             publish_from: publishFrom,
             publish_to: publishTo,
-            fetch_from: fetchFrom,
-            fetch_to: fetchTo,
-            min_views: minViews,
-            min_fav: minFav,
-            min_coin: minCoin,
-            min_reply: minReply,
-            min_fav_rate: minFavRate,
-            min_coin_rate: minCoinRate,
-            min_reply_rate: minReplyRate,
-            min_fav_fan_ratio: minFavFanRatio,
           }}
         />
       </header>
 
       <div className='filters'>
-        <select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-          <option value=''>全部任务</option>
-          {tasks.map((task) => (
-            <option key={task.id} value={task.id}>{task.name}</option>
-          ))}
-        </select>
-        <select value={tag} onChange={(e) => setTag(e.target.value)}>
-          <option value=''>全部标签</option>
-          <option value='basic_hot'>爆款</option>
-          <option value='low_fan_hot'>低粉爆款</option>
-        </select>
-        <select value={processStatus} onChange={(e) => setProcessStatus(e.target.value)}>
-          <option value=''>全部状态</option>
-          <option value='todo'>待处理</option>
-          <option value='done'>已处理</option>
-        </select>
-        <select value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value=''>默认排序</option>
-          <option value='views'>播放</option>
-          <option value='fav'>收藏</option>
-          <option value='coin'>投币</option>
-          <option value='reply'>评论</option>
-          <option value='fav_rate'>收藏率</option>
-          <option value='coin_rate'>投币率</option>
-          <option value='reply_rate'>评论率</option>
-          <option value='fav_fan_ratio'>收藏/粉丝比</option>
-          <option value='publish_time'>发布时间</option>
-          <option value='fetch_time'>抓取时间</option>
-        </select>
-        <input
-          type='date'
-          value={publishFrom}
-          onChange={(e) => setPublishFrom(e.target.value)}
-          aria-label='发布时间起始'
-          title='发布时间起始'
-        />
-        <input
-          type='date'
-          value={publishTo}
-          onChange={(e) => setPublishTo(e.target.value)}
-          aria-label='发布时间结束'
-          title='发布时间结束'
-        />
-        <input
-          type='date'
-          value={fetchFrom}
-          onChange={(e) => setFetchFrom(e.target.value)}
-          aria-label='抓取时间起始'
-          title='抓取时间起始'
-        />
-        <input
-          type='date'
-          value={fetchTo}
-          onChange={(e) => setFetchTo(e.target.value)}
-          aria-label='抓取时间结束'
-          title='抓取时间结束'
-        />
-        <input placeholder='播放≥' value={minViews} onChange={(e) => setMinViews(e.target.value)} />
-        <input placeholder='收藏≥' value={minFav} onChange={(e) => setMinFav(e.target.value)} />
-        <input placeholder='投币≥' value={minCoin} onChange={(e) => setMinCoin(e.target.value)} />
-        <input placeholder='评论≥' value={minReply} onChange={(e) => setMinReply(e.target.value)} />
-        <input placeholder='收藏率≥' value={minFavRate} onChange={(e) => setMinFavRate(e.target.value)} />
-        <input placeholder='投币率≥' value={minCoinRate} onChange={(e) => setMinCoinRate(e.target.value)} />
-        <input placeholder='评论率≥' value={minReplyRate} onChange={(e) => setMinReplyRate(e.target.value)} />
-        <input placeholder='收藏/粉丝比≥' value={minFavFanRatio} onChange={(e) => setMinFavFanRatio(e.target.value)} />
+        <div className='filter-block'>
+          <div className='filter-header'>
+            <label>标签筛选</label>
+            <button className='btn ghost small' onClick={clearAll} disabled={!canClear}>清空全部</button>
+          </div>
+          <TagInput
+            value={labels}
+            suggestions={tagOptions}
+            onChange={setLabels}
+            placeholder='选择或输入标签'
+          />
+        </div>
+        <div className='filter-block'>
+          <label>发布时间</label>
+          <div className='date-quick'>
+            <button className={`btn ghost small ${quickDays === 3 ? 'active' : ''}`} onClick={() => applyQuickDays(3)}>3天内</button>
+            <button className={`btn ghost small ${quickDays === 7 ? 'active' : ''}`} onClick={() => applyQuickDays(7)}>7天内</button>
+            <button className={`btn ghost small ${quickDays === 15 ? 'active' : ''}`} onClick={() => applyQuickDays(15)}>15天内</button>
+            <button className={`btn ghost small ${quickDays === null ? 'active' : ''}`} onClick={() => setQuickDays(null)}>自定义</button>
+          </div>
+          <div className='date-range'>
+            <input type='date' value={publishFrom} onChange={(e) => handlePublishFrom(e.target.value)} />
+            <span>至</span>
+            <input type='date' value={publishTo} onChange={(e) => handlePublishTo(e.target.value)} />
+          </div>
+        </div>
       </div>
 
-      <div className='quick-filters'>
-        <button className='btn ghost small' onClick={() => applyQuick('', '')}>全部</button>
-        <button className='btn ghost small' onClick={() => applyQuick('basic_hot', processStatus)}>爆款</button>
-        <button className='btn ghost small' onClick={() => applyQuick('low_fan_hot', processStatus)}>低粉爆款</button>
-        <button className='btn ghost small' onClick={() => applyQuick(tag, 'todo')}>待处理</button>
-        <button className='btn ghost small' onClick={() => applyQuick(tag, 'done')}>已处理</button>
-      </div>
-
-        {selected.length > 0 && (
+      {selected.length > 0 && (
         <div className='bulk-bar'>
           <div className='select-all'>
             <input type='checkbox' checked={allSelected} onChange={toggleSelectAll} />
@@ -281,31 +276,63 @@ export default function VideosPage() {
                 <input type='checkbox' checked={selected.includes(v.bvid)} onChange={() => toggleSelect(v.bvid)} />
               </div>
               <div className='cover'>
-                {v.cover_url ? <img src={v.cover_url} alt={v.title} /> : <div className='cover-placeholder'>No Cover</div>}
+                {!coverError[v.bvid] ? (
+                  <img
+                    src={`${baseUrl}/api/videos/${v.bvid}/cover`}
+                    alt={v.title}
+                    loading='lazy'
+                    onError={() => setCoverError((prev) => ({ ...prev, [v.bvid]: true }))}
+                  />
+                ) : (
+                  <div className='cover-placeholder'>No Cover</div>
+                )}
               </div>
               <div className='video-body'>
-                <h3>{v.title}</h3>
-                <p>{v.up_name} · 粉丝 {v.follower_count}</p>
-                <div className='stats'>
-                  <span>播放 {v.stats.views}</span>
-                  <span>收藏 {v.stats.fav}</span>
-                  <span>投币 {v.stats.coin}</span>
-                  <span>评论 {v.stats.reply}</span>
-                  <span>收藏率 {(v.stats.fav_rate * 100).toFixed(2)}%</span>
-                  <span>投币率 {(v.stats.coin_rate * 100).toFixed(2)}%</span>
-                  <span>评论率 {(v.stats.reply_rate * 100).toFixed(2)}%</span>
-                  <span>收藏/粉丝比 {v.stats.fav_fan_ratio.toFixed(3)}</span>
+                <h3><Link className='video-title' to={`/videos/${v.bvid}`}>{v.title}</Link></h3>
+                <div className='video-sub'>
+                  发布时间：{v.publish_time ? dayjs(v.publish_time).format('YYYY-MM-DD') : '-'}
                 </div>
-                <div className='tags'>
+                <div className='video-author'>
+                  {v.up_name} · 粉丝 {formatCount(v.follower_count)}
+                </div>
+                <div className='stat-grid'>
+                  <div className='stat-item'>
+                    <span>播放量</span>
+                    <strong>{formatCount(v.stats.views)}</strong>
+                  </div>
+                  <div className='stat-item'>
+                    <span>评论</span>
+                    <strong>{formatCount(v.stats.reply)}</strong>
+                  </div>
+                  <div className='stat-item'>
+                    <span>收藏</span>
+                    <strong>{formatCount(v.stats.fav)}</strong>
+                  </div>
+                  <div className='stat-item'>
+                    <span>投币</span>
+                    <strong>{formatCount(v.stats.coin)}</strong>
+                  </div>
+                </div>
+                <div className='tags-row'>
                   {v.tags.basic_hot.is_hit && <span className='pill hot'>爆款</span>}
                   {v.tags.low_fan_hot.is_hit && <span className='pill low'>低粉爆款</span>}
                   <span className='pill status'>{v.process_status === 'done' ? '已处理' : '待处理'}</span>
+                  {v.labels && v.labels.length > 0 && (
+                    <span className='tag-text'>标签：{v.labels.join(' / ')}</span>
+                  )}
                 </div>
-                <div className='video-meta'>
-                  <span>发布时间 {v.publish_time ? dayjs(v.publish_time).format('MM-DD') : '-'}</span>
-                  <span>抓取时间 {dayjs(v.fetch_time).format('MM-DD HH:mm')}</span>
+                <div className='video-actions'>
+                  <div className='subtitle-actions'>
+                    <button className='btn ghost' onClick={() => setSubtitleMenu(subtitleMenu === v.bvid ? null : v.bvid)}>字幕</button>
+                    {subtitleMenu === v.bvid && (
+                      <div className='subtitle-menu'>
+                        <button className='subtitle-item' onMouseDown={(e) => { e.preventDefault(); copySubtitle(v.bvid) }}>复制字幕</button>
+                        <button className='subtitle-item' onMouseDown={(e) => { e.preventDefault(); downloadSubtitle(v.bvid) }}>下载字幕</button>
+                      </div>
+                    )}
+                  </div>
+                  <button className='btn ghost' onClick={() => downloadCover(v.bvid)}>封面海报</button>
                 </div>
-                <Link className='btn ghost' to={`/videos/${v.bvid}`}>查看详情</Link>
               </div>
             </div>
           ))}

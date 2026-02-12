@@ -9,11 +9,13 @@ export default function VideoDetailPage() {
   const [video, setVideo] = useState<any>(null)
   const [note, setNote] = useState('')
   const [subtitle, setSubtitle] = useState<any>(null)
+  const [tagInput, setTagInput] = useState('')
 
   const load = async () => {
     const res = await api.get(`/api/videos/${bvid}`)
     setVideo(res.data)
     setNote(res.data.note || '')
+    setTagInput((res.data.labels || []).join(', '))
     try {
       const sub = await api.get(`/api/videos/${bvid}/subtitle`)
       setSubtitle(sub.data)
@@ -38,6 +40,12 @@ export default function VideoDetailPage() {
     await load()
   }
 
+  const saveTags = async () => {
+    const tags = tagInput.split(/,|，/).map((t) => t.trim()).filter(Boolean)
+    await api.post(`/api/videos/${bvid}/tags`, { tags })
+    await load()
+  }
+
   const markDone = async () => {
     const next = video.process_status === 'done' ? 'todo' : 'done'
     await api.post(`/api/videos/${bvid}/process_status`, { process_status: next })
@@ -59,7 +67,10 @@ export default function VideoDetailPage() {
 
       <div className='detail-grid'>
         <div className='panel'>
-          {video.cover_url ? <img src={video.cover_url} alt={video.title} /> : <div className='cover-placeholder'>No Cover</div>}
+          <img
+            src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/videos/${video.bvid}/cover`}
+            alt={video.title}
+          />
         </div>
         <div className='panel'>
           <h3>指标</h3>
@@ -91,6 +102,23 @@ export default function VideoDetailPage() {
           <h3>字幕</h3>
           <p>状态：{subtitle?.status || 'none'}</p>
           <textarea value={subtitle?.text || ''} readOnly />
+        </div>
+        <div className='panel'>
+          <h3>标签</h3>
+          {video.labels && video.labels.length > 0 && (
+            <div className='label-list'>
+              {video.labels.map((label: string) => (
+                <span key={label} className='label-chip'>{label}</span>
+              ))}
+            </div>
+          )}
+          <input
+            className='tag-input'
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            placeholder='输入标签，逗号分隔'
+          />
+          <button className='btn ghost' onClick={saveTags}>保存标签</button>
         </div>
         <div className='panel'>
           <h3>备注</h3>

@@ -2,8 +2,12 @@
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: grid; gap: 10px; }
 .panel img { width: 100%; border-radius: 12px; }
 .panel textarea { min-height: 160px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px; color: var(--text); }
+.panel input { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px; color: var(--text); }
 .stats { display: flex; flex-wrap: wrap; gap: 10px; }
 .tags { display: flex; gap: 8px; }
 .actions { display: flex; gap: 10px; }
 .tag-reasons { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
 .tag-reasons p { margin: 0; }
+.label-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.label-chip { background: var(--accent-soft); color: var(--accent); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+.tag-input { width: 100%; }

@@ -14,6 +14,7 @@ class VideoOut(BaseModel):
     cover_url: str | None
     stats: dict[str, Any]
     tags: dict[str, Any]
+    labels: list[str]
     source_task_ids: list[str]
     source_task_names: list[str]
     process_status: str

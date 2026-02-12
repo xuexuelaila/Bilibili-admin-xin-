@@ -1,0 +1,9 @@
+.tag-select { display: grid; gap: 8px; position: relative; }
+.tag-field { min-height: 44px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; cursor: text; }
+.tag-field input { border: none; background: transparent; outline: none; flex: 1; min-width: 140px; font-family: var(--font-body); color: var(--text); }
+.tag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.tag-remove { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.tag-dropdown { position: absolute; left: 0; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 24px rgba(0,0,0,0.08); padding: 8px; display: grid; gap: 6px; z-index: 10; max-height: 240px; overflow: auto; }
+.tag-option { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; text-align: left; cursor: pointer; font-size: 12px; color: var(--text); }
+.tag-option.create { border-style: dashed; color: var(--muted); }
+.tag-option:hover { border-color: var(--accent); }

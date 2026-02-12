@@ -4,6 +4,7 @@ interface ExportFilters {
   bvids?: string
   tag?: string
   process_status?: string
+  labels?: string
   sort?: string
   task_id?: string
   publish_from?: string
@@ -38,6 +39,7 @@ const FIELD_OPTIONS = [
   { key: 'basic_hot', label: '爆款' },
   { key: 'low_fan_hot', label: '低粉爆款' },
   { key: 'process_status', label: '处理状态' },
+  { key: 'labels', label: '标签' },
   { key: 'task_ids', label: '任务ID' },
   { key: 'task_names', label: '任务名称' },
   { key: 'export_status', label: '导出状态' },

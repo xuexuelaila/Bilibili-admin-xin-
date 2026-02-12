@@ -6,17 +6,14 @@ import RunsPage from './pages/RunsPage'
 import RunDetailPage from './pages/RunDetailPage'
 import VideosPage from './pages/VideosPage'
 import VideoDetailPage from './pages/VideoDetailPage'
-import SettingsPage from './pages/SettingsPage'
-import AlertsPage from './pages/AlertsPage'
-import DashboardPage from './pages/DashboardPage'
-import TemplatesPage from './pages/TemplatesPage'
+import SystemPage from './pages/SystemPage'
 
 export default function App() {
   return (
     <AppLayout>
       <Routes>
-        <Route path='/' element={<Navigate to='/dashboard' replace />} />
-        <Route path='/dashboard' element={<DashboardPage />} />
+        <Route path='/' element={<Navigate to='/tasks' replace />} />
+        <Route path='/dashboard' element={<Navigate to='/tasks' replace />} />
         <Route path='/tasks' element={<TasksPage />} />
         <Route path='/tasks/new' element={<TaskFormPage mode='create' />} />
         <Route path='/tasks/:id/edit' element={<TaskFormPage mode='edit' />} />
@@ -24,9 +21,9 @@ export default function App() {
         <Route path='/runs/:runId' element={<RunDetailPage />} />
         <Route path='/videos' element={<VideosPage />} />
         <Route path='/videos/:bvid' element={<VideoDetailPage />} />
-        <Route path='/settings' element={<SettingsPage />} />
-        <Route path='/alerts' element={<AlertsPage />} />
-        <Route path='/templates' element={<TemplatesPage />} />
+        <Route path='/settings' element={<SystemPage />} />
+        <Route path='/alerts' element={<Navigate to='/settings' replace />} />
+        <Route path='/templates' element={<Navigate to='/settings' replace />} />
       </Routes>
     </AppLayout>
   )

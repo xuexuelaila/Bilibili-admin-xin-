@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, or_, func, case
+from sqlalchemy import select, or_, func, case, String, cast
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -28,7 +28,13 @@ def list_tasks(
     if status:
         query = query.where(Task.status == status)
     if q:
-        query = query.where(or_(Task.name.ilike(f"%{q}%")))
+        like = f"%{q}%"
+        query = query.where(
+            or_(
+                Task.name.ilike(like),
+                func.lower(cast(Task.keywords, String)).like(f"%{q.lower()}%"),
+            )
+        )
 
     total = db.execute(select(func.count()).select_from(query.subquery())).scalar()
     tasks = (
@@ -36,11 +42,6 @@ def list_tasks(
         .scalars()
         .all()
     )
-
-    if q:
-        q_lower = q.lower()
-        tasks = [t for t in tasks if q_lower in t.name.lower() or any(q_lower in k.lower() for k in (t.keywords or []))]
-        total = len(tasks)
 
     items = [TaskOut.model_validate(t) for t in tasks]
     return {"items": items, "page": page, "page_size": page_size, "total": total}
@@ -135,6 +136,7 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
         name=payload.name,
         keywords=payload.keywords,
         exclude_words=payload.exclude_words,
+        tags=payload.tags,
         scope=payload.scope or default_scope(),
         schedule=payload.schedule or default_schedule(),
         rules=payload.rules or default_rules(),

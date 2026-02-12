@@ -21,6 +21,7 @@ class Task(Base):
     name = Column(String(200), nullable=False)
     keywords = Column(JSON, nullable=False, default=list)
     exclude_words = Column(JSON, nullable=False, default=list)
+    tags = Column(JSON, nullable=False, default=list)
     scope = Column(JSON, nullable=False, default=dict)
     schedule = Column(JSON, nullable=False, default=dict)
     rules = Column(JSON, nullable=False, default=dict)

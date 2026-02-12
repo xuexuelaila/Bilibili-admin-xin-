@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, String, cast
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -30,6 +30,7 @@ def list_videos(
     task_id: str | None = None,
     tag: str | None = None,
     process_status: str | None = None,
+    labels: str | None = None,
     publish_from: str | None = None,
     publish_to: str | None = None,
     fetch_from: str | None = None,
@@ -57,6 +58,12 @@ def list_videos(
         query = query.where(Video.low_fan_hot == True)  # noqa: E712
     if process_status:
         query = query.where(Video.process_status == process_status)
+    if labels:
+        label_list = [l.strip() for l in labels.split(",") if l.strip()]
+        if label_list:
+            lowered = func.lower(cast(Video.tags, String))
+            conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in label_list]
+            query = query.where(or_(*conditions))
 
     if publish_from:
         query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
@@ -130,6 +137,7 @@ def export_csv(
     task_id: str | None = None,
     tag: str | None = None,
     process_status: str | None = None,
+    labels: str | None = None,
     publish_from: str | None = None,
     publish_to: str | None = None,
     fetch_from: str | None = None,
@@ -160,6 +168,12 @@ def export_csv(
         query = query.where(Video.low_fan_hot == True)  # noqa: E712
     if process_status:
         query = query.where(Video.process_status == process_status)
+    if labels:
+        label_list = [l.strip() for l in labels.split(",") if l.strip()]
+        if label_list:
+            lowered = func.lower(cast(Video.tags, String))
+            conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in label_list]
+            query = query.where(or_(*conditions))
 
     if publish_from:
         query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
@@ -246,6 +260,7 @@ def export_csv(
         "basic_hot": lambda v: v.basic_hot,
         "low_fan_hot": lambda v: v.low_fan_hot,
         "process_status": lambda v: v.process_status,
+        "labels": lambda v: ",".join(v.tags or []),
         "task_ids": lambda v: ",".join(v.source_task_ids or []),
         "task_names": task_names,
         "export_status": lambda v: "成功",
@@ -269,6 +284,7 @@ def export_csv(
         "basic_hot": "爆款",
         "low_fan_hot": "低粉爆款",
         "process_status": "处理状态",
+        "labels": "标签",
         "task_ids": "任务ID",
         "task_names": "任务名称",
         "export_status": "导出状态",
@@ -386,14 +402,12 @@ def batch_cover_download(bvids: str, db: Session = Depends(get_db)):
             if not v.cover_url:
                 failed_rows.append([v.bvid, "missing_cover_url"])
                 continue
-            url = v.cover_url
-            if url.startswith("//"):
-                url = "https:" + url
+            url = _normalize_cover_url(v.cover_url)
             ext = _infer_ext(url)
             folder = _pick_task_folder(v.source_task_ids or [], task_map)
             filename = f"{folder}/{v.bvid}{ext}"
             try:
-                res = httpx.get(url, timeout=10)
+                res = httpx.get(url, timeout=10, headers=_cover_headers())
                 if res.status_code == 200:
                     zf.writestr(filename, res.content)
                 else:
@@ -415,6 +429,24 @@ def batch_cover_download(bvids: str, db: Session = Depends(get_db)):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=covers.zip"},
     )
+
+
+def _cover_headers() -> dict[str, str]:
+    headers = {
+        "User-Agent": settings.bili_user_agent,
+        "Referer": settings.bili_referer,
+    }
+    if settings.bili_cookies:
+        headers["Cookie"] = settings.bili_cookies
+    return headers
+
+
+def _normalize_cover_url(url: str | None) -> str:
+    if not url:
+        return ""
+    if url.startswith("//"):
+        return "https:" + url
+    return url
 
 
 def _infer_ext(url: str) -> str:
@@ -453,6 +485,27 @@ def get_video(bvid: str, db: Session = Depends(get_db)):
     return video_to_out(video, task_map)
 
 
+@router.get("/{bvid}/cover")
+
+def view_cover(bvid: str, db: Session = Depends(get_db)):
+    video = db.get(Video, bvid)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not video.cover_url:
+        raise HTTPException(status_code=404, detail="cover not found")
+    url = _normalize_cover_url(video.cover_url)
+    try:
+        res = httpx.get(url, timeout=10, headers=_cover_headers())
+        if res.status_code != 200:
+            raise HTTPException(status_code=502, detail="cover download failed")
+        return StreamingResponse(
+            io.BytesIO(res.content),
+            media_type=res.headers.get("content-type", "image/jpeg"),
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="cover download failed")
+
+
 @router.post("/{bvid}/process_status")
 
 def update_process_status(bvid: str, payload: dict, db: Session = Depends(get_db)):
@@ -479,6 +532,22 @@ def update_note(bvid: str, payload: dict, db: Session = Depends(get_db)):
     db.add(video)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{bvid}/tags")
+
+def update_tags(bvid: str, payload: dict, db: Session = Depends(get_db)):
+    video = db.get(Video, bvid)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    tags = payload.get("tags") or []
+    if not isinstance(tags, list):
+        raise HTTPException(status_code=400, detail="tags must be list")
+    cleaned = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+    video.tags = list(dict.fromkeys(cleaned))
+    db.add(video)
+    db.commit()
+    return {"ok": True, "tags": video.tags}
 
 
 @router.post("/{bvid}/subtitle/extract")
@@ -534,11 +603,9 @@ def download_cover(bvid: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Video not found")
     if not video.cover_url:
         raise HTTPException(status_code=404, detail="cover not found")
-    url = video.cover_url
-    if url.startswith("//"):
-        url = "https:" + url
+    url = _normalize_cover_url(video.cover_url)
     try:
-        res = httpx.get(url, timeout=10)
+        res = httpx.get(url, timeout=10, headers=_cover_headers())
         if res.status_code != 200:
             raise HTTPException(status_code=502, detail="cover download failed")
         return StreamingResponse(
@@ -579,6 +646,7 @@ def video_to_out(video: Video, task_map: dict[str, str] | None = None) -> VideoO
         cover_url=video.cover_url,
         stats=stats,
         tags=tags,
+        labels=video.tags or [],
         source_task_ids=video.source_task_ids or [],
         source_task_names=[task_map.get(tid, "") for tid in (video.source_task_ids or []) if task_map.get(tid)],
         process_status=video.process_status,

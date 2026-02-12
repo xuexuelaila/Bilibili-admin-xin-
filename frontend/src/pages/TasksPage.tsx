@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
 import Pagination from '../components/Pagination'
 import '../components/Pagination.css'
 import Empty from '../components/Empty'
+import TagInput from '../components/TagInput'
 import './TasksPage.css'
 
 interface Task {
@@ -57,6 +58,15 @@ interface PreviewResult {
   samples: PreviewSample[]
 }
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className='info-tip' tabIndex={0} aria-label={text}>
+      i
+      <span className='info-bubble'>{text}</span>
+    </span>
+  )
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [metrics, setMetrics] = useState<Metrics | null>(null)
@@ -68,6 +78,12 @@ export default function TasksPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [summaryMap, setSummaryMap] = useState<Record<string, TaskSummary>>({})
+  const [runningMap, setRunningMap] = useState<Record<string, number>>({})
+  const timersRef = useRef<Record<string, number>>({})
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [tagOptions, setTagOptions] = useState<string[]>([])
+  const basicHotTip = '爆款=命中基础爆款规则。默认：播放>=100000 或 收藏>=1500 或 投币>=500 或 评论>=200。以任务规则为准。'
+  const lowFanTip = '低粉爆款=命中低粉规则。默认：粉丝<=50000、播放>=30000、收藏率>=0.012、投币率>=0.0025、评论率>=0.002、收藏/粉丝>=0.02（需全部满足）。以任务规则为准。'
 
   const load = async () => {
     setLoading(true)
@@ -96,14 +112,25 @@ export default function TasksPage() {
     load()
   }, [page, pageSize, status])
 
+  useEffect(() => {
+    api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
+  }, [])
+
   const search = () => {
     setPage(1)
     load()
   }
 
   const runNow = async (id: string) => {
-    await api.post(`/api/tasks/${id}/run`)
-    await load()
+    startProgress(id)
+    try {
+      await api.post(`/api/tasks/${id}/run`)
+      await load()
+      finishProgress(id, true)
+    } catch {
+      finishProgress(id, false)
+      window.alert('运行失败，请稍后重试。')
+    }
   }
 
   const toggle = async (task: Task) => {
@@ -133,6 +160,49 @@ export default function TasksPage() {
     await load()
   }
 
+  const startProgress = (id: string) => {
+    if (timersRef.current[id]) return
+    setRunningMap((prev) => ({ ...prev, [id]: 5 }))
+    timersRef.current[id] = window.setInterval(() => {
+      setRunningMap((prev) => {
+        const current = prev[id] ?? 0
+        if (current >= 90) return prev
+        const next = Math.min(90, current + Math.max(2, Math.round(Math.random() * 6)))
+        return { ...prev, [id]: next }
+      })
+    }, 800)
+  }
+
+  const finishProgress = (id: string, ok: boolean) => {
+    if (timersRef.current[id]) {
+      window.clearInterval(timersRef.current[id])
+      delete timersRef.current[id]
+    }
+    if (!ok) {
+      setRunningMap((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      return
+    }
+    setRunningMap((prev) => ({ ...prev, [id]: 100 }))
+    window.setTimeout(() => {
+      setRunningMap((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    }, 800)
+  }
+
+  useEffect(() => {
+    return () => {
+      Object.values(timersRef.current).forEach((timerId) => window.clearInterval(timerId))
+      timersRef.current = {}
+    }
+  }, [])
+
   return (
     <div className='page'>
       <header className='page-header'>
@@ -150,11 +220,17 @@ export default function TasksPage() {
             <strong>{metrics.today_new_videos}</strong>
           </div>
           <div className='metric-card'>
-            <span>今日爆款</span>
+            <span className='metric-label'>
+              今日爆款
+              <InfoTip text={basicHotTip} />
+            </span>
             <strong>{metrics.today_basic_hot}</strong>
           </div>
           <div className='metric-card'>
-            <span>低粉爆款</span>
+            <span className='metric-label'>
+              低粉爆款
+              <InfoTip text={lowFanTip} />
+            </span>
             <strong>{metrics.today_low_fan_hot}</strong>
           </div>
           <div className='metric-card'>
@@ -196,8 +272,14 @@ export default function TasksPage() {
             </div>
             <div className='task-metrics'>
               <span>今日新增 {summaryMap[task.id]?.today_new ?? 0}</span>
-              <span>今日爆款 {summaryMap[task.id]?.today_basic ?? 0}</span>
-              <span>低粉爆款 {summaryMap[task.id]?.today_low ?? 0}</span>
+              <span className='metric-inline'>
+                今日爆款 {summaryMap[task.id]?.today_basic ?? 0}
+                <InfoTip text={basicHotTip} />
+              </span>
+              <span className='metric-inline'>
+                低粉爆款 {summaryMap[task.id]?.today_low ?? 0}
+                <InfoTip text={lowFanTip} />
+              </span>
               <span>近7天成功率 {summaryMap[task.id]?.success_rate_7d ?? 0}%</span>
             </div>
             <div className='task-meta'>
@@ -207,14 +289,20 @@ export default function TasksPage() {
               <span>状态：{summaryMap[task.id]?.last_run_status || '-'}</span>
             </div>
             <div className='task-actions'>
-              <button className='btn ghost' onClick={() => runNow(task.id)}>立即运行</button>
+              <button className='btn ghost' onClick={() => runNow(task.id)} disabled={runningMap[task.id] !== undefined}>立即运行</button>
               <button className='btn ghost' onClick={() => dryRun(task)}>试跑</button>
-              <Link className='btn ghost' to={`/tasks/${task.id}/edit`}>编辑</Link>
+              <button className='btn ghost' onClick={() => setEditingTaskId(task.id)}>编辑</button>
               <Link className='btn ghost' to={`/tasks/${task.id}/runs`}>运行记录</Link>
               <button className='btn ghost' onClick={() => toggle(task)}>{task.status === 'enabled' ? '停用' : '启用'}</button>
               <button className='btn ghost' onClick={() => cloneTask(task)}>复制</button>
               <button className='btn ghost danger' onClick={() => deleteTask(task)}>删除</button>
             </div>
+            {runningMap[task.id] !== undefined && (
+              <div className='run-progress'>
+                <div className='run-progress-bar' style={{ width: `${runningMap[task.id]}%` }} />
+                <span>{runningMap[task.id] >= 100 ? '完成' : '运行中...'}</span>
+              </div>
+            )}
           </div>
         ))}
       </section>
@@ -255,6 +343,144 @@ export default function TasksPage() {
           </div>
         </section>
       )}
+
+      {editingTaskId && (
+        <TaskEditModal
+          taskId={editingTaskId}
+          tagOptions={tagOptions}
+          onClose={() => setEditingTaskId(null)}
+          onSaved={async () => {
+            setEditingTaskId(null)
+            await load()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function TaskEditModal({
+  taskId,
+  tagOptions,
+  onClose,
+  onSaved,
+}: {
+  taskId: string
+  tagOptions: string[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    name: '',
+    keywords: '',
+    exclude_words: '',
+    tags: [] as string[],
+    days_limit: 30,
+    fetch_limit: 200,
+    search_sort: 'relevance',
+    schedule_time: '09:00',
+  })
+
+  useEffect(() => {
+    api.get(`/api/tasks/${taskId}`).then((res) => {
+      const task = res.data
+      setForm({
+        name: task.name || '',
+        keywords: (task.keywords || []).join('\n'),
+        exclude_words: (task.exclude_words || []).join('\n'),
+        tags: task.tags || [],
+        days_limit: task.scope?.days_limit ?? 30,
+        fetch_limit: task.scope?.fetch_limit ?? 200,
+        search_sort: task.scope?.search_sort ?? 'relevance',
+        schedule_time: task.schedule?.time ?? '09:00',
+      })
+    })
+  }, [taskId])
+
+  const update = (key: string, value: any) => setForm((prev) => ({ ...prev, [key]: value }))
+
+  const submit = async () => {
+    setSaving(true)
+    const payload = {
+      name: form.name,
+      keywords: form.keywords.split(/\n|,|，/).map((k) => k.trim()).filter(Boolean),
+      exclude_words: form.exclude_words.split(/\n|,|，/).map((k) => k.trim()).filter(Boolean),
+      tags: form.tags,
+      scope: {
+        days_limit: Number(form.days_limit),
+        fetch_limit: Number(form.fetch_limit),
+        search_sort: form.search_sort,
+      },
+      schedule: {
+        type: 'daily',
+        time: form.schedule_time,
+      },
+    }
+    await api.put(`/api/tasks/${taskId}`, payload)
+    setSaving(false)
+    await onSaved()
+  }
+
+  return (
+    <div className='modal-mask' onClick={onClose}>
+      <div className='modal-card' onClick={(e) => e.stopPropagation()}>
+        <div className='modal-header'>
+          <h3>编辑任务</h3>
+          <button className='btn ghost' onClick={onClose}>关闭</button>
+        </div>
+        <div className='modal-body'>
+          <div className='modal-grid'>
+            <label>
+              任务名
+              <input value={form.name} onChange={(e) => update('name', e.target.value)} />
+            </label>
+            <label>
+              每日运行时间
+              <input type='time' value={form.schedule_time} onChange={(e) => update('schedule_time', e.target.value)} />
+            </label>
+          </div>
+          <label>
+            商品关键词（换行或逗号分隔）
+            <textarea value={form.keywords} onChange={(e) => update('keywords', e.target.value)} />
+          </label>
+          <label>
+            排除词（可选）
+            <textarea value={form.exclude_words} onChange={(e) => update('exclude_words', e.target.value)} />
+          </label>
+          <label>
+            视频标签（抓取后自动打标，换行或逗号分隔）
+            <TagInput
+              value={form.tags}
+              suggestions={tagOptions}
+              onChange={(tags) => update('tags', tags)}
+              placeholder='输入标签，回车添加'
+            />
+          </label>
+          <div className='modal-grid'>
+            <label>
+              近几天
+              <input type='number' value={form.days_limit} onChange={(e) => update('days_limit', e.target.value)} />
+            </label>
+            <label>
+              每次抓取上限
+              <input type='number' value={form.fetch_limit} onChange={(e) => update('fetch_limit', e.target.value)} />
+            </label>
+            <label>
+              搜索排序
+              <select value={form.search_sort} onChange={(e) => update('search_sort', e.target.value)}>
+                <option value='relevance'>综合</option>
+                <option value='new'>最新</option>
+                <option value='views'>最多播放</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className='modal-footer'>
+          <button className='btn ghost' onClick={onClose}>取消</button>
+          <button className='btn primary' onClick={submit} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -9,6 +9,7 @@ class TaskBase(BaseModel):
     name: str
     keywords: list[str] = Field(default_factory=list)
     exclude_words: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     scope: dict[str, Any] = Field(default_factory=default_scope)
     schedule: dict[str, Any] = Field(default_factory=default_schedule)
     rules: dict[str, Any] = Field(default_factory=default_rules)
@@ -22,6 +23,7 @@ class TaskUpdate(BaseModel):
     name: str | None = None
     keywords: list[str] | None = None
     exclude_words: list[str] | None = None
+    tags: list[str] | None = None
     scope: dict[str, Any] | None = None
     schedule: dict[str, Any] | None = None
     rules: dict[str, Any] | None = None
