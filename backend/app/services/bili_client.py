@@ -25,6 +25,9 @@ class BiliClient:
     def get_subtitle(self, bvid: str) -> str | None:
         raise NotImplementedError
 
+    def get_audio_url(self, bvid: str) -> str | None:
+        raise NotImplementedError
+
 
 class MockBiliClient(BiliClient):
     def search_videos(self, keyword: str, days_limit: int, fetch_limit: int, search_sort: str, partitions=None):
@@ -40,4 +43,7 @@ class MockBiliClient(BiliClient):
         return {"up_name": "", "follower_count": 0}
 
     def get_subtitle(self, bvid: str) -> str | None:
+        return None
+
+    def get_audio_url(self, bvid: str) -> str | None:
         return None

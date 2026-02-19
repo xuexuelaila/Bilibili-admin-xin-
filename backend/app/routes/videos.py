@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
-from sqlalchemy import select, func, or_, String, cast
+from sqlalchemy import select, func, or_, String, cast, case
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,9 +16,8 @@ from app.schemas.video import VideoOut
 from app.schemas.subtitle import SubtitleOut
 from app.schemas.pagination import Page
 from app.services.bili_client import MockBiliClient
-from app.services.bili_crawler import CrawlerBiliClient
 from app.core.config import settings
-from app.services.settings_service import get_or_create_settings
+from app.workers.tasks import extract_subtitle as celery_extract_subtitle
 
 router = APIRouter()
 
@@ -31,6 +30,7 @@ def list_videos(
     tag: str | None = None,
     process_status: str | None = None,
     labels: str | None = None,
+    tags: str | None = None,
     publish_from: str | None = None,
     publish_to: str | None = None,
     fetch_from: str | None = None,
@@ -45,6 +45,7 @@ def list_videos(
     min_fav_fan_ratio: float | None = None,
     fan_max: int | None = None,
     sort: str | None = None,
+    order: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -58,12 +59,19 @@ def list_videos(
         query = query.where(Video.low_fan_hot == True)  # noqa: E712
     if process_status:
         query = query.where(Video.process_status == process_status)
+    label_list: list[str] = []
     if labels:
-        label_list = [l.strip() for l in labels.split(",") if l.strip()]
-        if label_list:
-            lowered = func.lower(cast(Video.tags, String))
-            conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in label_list]
-            query = query.where(or_(*conditions))
+        label_list.extend([l.strip() for l in labels.split(",") if l.strip()])
+    if tags:
+        label_list.extend([l.strip() for l in tags.split(",") if l.strip()])
+    if label_list:
+        lowered = func.lower(cast(Video.tags, String))
+        deduped = []
+        for item in label_list:
+            if item.lower() not in [d.lower() for d in deduped]:
+                deduped.append(item)
+        conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in deduped]
+        query = query.where(or_(*conditions))
 
     if publish_from:
         query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
@@ -94,21 +102,37 @@ def list_videos(
         query = query.where(Video.follower_count <= fan_max)
 
     sort_map = {
-        "views": Video.views.desc(),
-        "fav": Video.fav.desc(),
-        "coin": Video.coin.desc(),
-        "reply": Video.reply.desc(),
-        "fav_rate": Video.fav_rate.desc(),
-        "coin_rate": Video.coin_rate.desc(),
-        "reply_rate": Video.reply_rate.desc(),
-        "fav_fan_ratio": Video.fav_fan_ratio.desc(),
-        "publish_time": Video.publish_time.desc(),
-        "fetch_time": Video.fetch_time.desc(),
+        "views": Video.views,
+        "fav": Video.fav,
+        "coin": Video.coin,
+        "reply": Video.reply,
+        "fav_rate": Video.fav_rate,
+        "coin_rate": Video.coin_rate,
+        "reply_rate": Video.reply_rate,
+        "fav_fan_ratio": Video.fav_fan_ratio,
+        "publish_time": Video.publish_time,
+        "fetch_time": Video.fetch_time,
     }
-    if sort in sort_map:
-        query = query.order_by(sort_map[sort])
+    sort = sort or "publish_time"
+    order_dir = (order or "desc").lower()
+
+    def _order_with_nulls_last(col):
+        null_flag = case((col.is_(None), 1), else_=0)
+        if order_dir == "asc":
+            return (null_flag.asc(), col.asc())
+        return (null_flag.asc(), col.desc())
+
+    if sort == "views_delta_1d":
+        delta_col = getattr(Video, "views_delta_1d", None)
+        if delta_col is not None:
+            query = query.order_by(*_order_with_nulls_last(delta_col))
+        else:
+            query = query.order_by(Video.publish_time.desc())
+    elif sort in sort_map:
+        col = sort_map[sort]
+        query = query.order_by(col.asc() if order_dir == "asc" else col.desc())
     else:
-        query = query.order_by(Video.fetch_time.desc())
+        query = query.order_by(Video.publish_time.desc())
 
     total = db.execute(select(func.count()).select_from(query.subquery())).scalar()
     rows = (
@@ -138,6 +162,7 @@ def export_csv(
     tag: str | None = None,
     process_status: str | None = None,
     labels: str | None = None,
+    tags: str | None = None,
     publish_from: str | None = None,
     publish_to: str | None = None,
     fetch_from: str | None = None,
@@ -168,12 +193,19 @@ def export_csv(
         query = query.where(Video.low_fan_hot == True)  # noqa: E712
     if process_status:
         query = query.where(Video.process_status == process_status)
+    label_list: list[str] = []
     if labels:
-        label_list = [l.strip() for l in labels.split(",") if l.strip()]
-        if label_list:
-            lowered = func.lower(cast(Video.tags, String))
-            conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in label_list]
-            query = query.where(or_(*conditions))
+        label_list.extend([l.strip() for l in labels.split(",") if l.strip()])
+    if tags:
+        label_list.extend([l.strip() for l in tags.split(",") if l.strip()])
+    if label_list:
+        lowered = func.lower(cast(Video.tags, String))
+        deduped = []
+        for item in label_list:
+            if item.lower() not in [d.lower() for d in deduped]:
+                deduped.append(item)
+        conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in deduped]
+        query = query.where(or_(*conditions))
 
     if publish_from:
         query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
@@ -337,43 +369,33 @@ def batch_update_status(payload: dict, db: Session = Depends(get_db)):
 @router.post("/subtitle/extract/batch")
 def batch_extract_subtitles(payload: dict, db: Session = Depends(get_db)):
     bvids = payload.get("bvids") or []
+    force = bool(payload.get("force", False))
     if not isinstance(bvids, list) or not bvids:
         raise HTTPException(status_code=400, detail="bvids cannot be empty")
 
-    if settings.bili_client == "crawler":
-        setting = get_or_create_settings(db)
-        client = CrawlerBiliClient(
-            rate_limit_per_sec=setting.rate_limit_per_sec,
-            retry_times=setting.retry_times,
-            timeout_seconds=setting.timeout_seconds,
-        )
-    else:
-        client = MockBiliClient()
+    videos = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    existing = {v.bvid for v in videos}
+    missing = [bvid for bvid in bvids if bvid not in existing]
 
-    updated = 0
-    failed = []
+    queued = 0
+    skipped = 0
     for bvid in bvids:
+        if bvid not in existing:
+            continue
         subtitle = db.get(Subtitle, bvid)
+        if subtitle and subtitle.status == "done" and subtitle.text and not force:
+            skipped += 1
+            continue
         if not subtitle:
             subtitle = Subtitle(bvid=bvid, status="extracting")
         subtitle.status = "extracting"
+        subtitle.error = None
         db.add(subtitle)
         db.commit()
+        celery_extract_subtitle.delay(bvid)
+        queued += 1
 
-        text = client.get_subtitle(bvid)
-        if text:
-            subtitle.status = "done"
-            subtitle.text = text
-            subtitle.error = None
-            updated += 1
-        else:
-            subtitle.status = "failed"
-            subtitle.error = "subtitle not found"
-            failed.append({"bvid": bvid, "reason": "subtitle not found"})
-        db.add(subtitle)
-        db.commit()
-
-    return {"ok": True, "updated": updated, "failed": failed, "total": len(bvids)}
+    return {"ok": True, "queued": queued, "skipped": skipped, "missing": missing, "total": len(bvids)}
 
 
 @router.get("/cover/download/batch")
@@ -552,38 +574,23 @@ def update_tags(bvid: str, payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/{bvid}/subtitle/extract")
 
-def extract_subtitle(bvid: str, db: Session = Depends(get_db)):
+def extract_subtitle(bvid: str, db: Session = Depends(get_db), force: bool = False):
     video = db.get(Video, bvid)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
     subtitle = db.get(Subtitle, bvid)
+    if subtitle and subtitle.status == "done" and subtitle.text and not force:
+        return {"status": "done", "queued": False}
     if not subtitle:
         subtitle = Subtitle(bvid=bvid, status="extracting")
     subtitle.status = "extracting"
+    subtitle.error = None
     db.add(subtitle)
     db.commit()
 
-    if settings.bili_client == "crawler":
-        setting = get_or_create_settings(db)
-        client = CrawlerBiliClient(
-            rate_limit_per_sec=setting.rate_limit_per_sec,
-            retry_times=setting.retry_times,
-            timeout_seconds=setting.timeout_seconds,
-        )
-    else:
-        client = MockBiliClient()
-    text = client.get_subtitle(bvid)
-    if text:
-        subtitle.status = "done"
-        subtitle.text = text
-    else:
-        subtitle.status = "failed"
-        subtitle.error = "subtitle not found"
-
-    db.add(subtitle)
-    db.commit()
-    return {"status": subtitle.status}
+    job = celery_extract_subtitle.delay(bvid)
+    return {"status": "extracting", "queued": True, "task_id": job.id}
 
 
 @router.get("/{bvid}/subtitle", response_model=SubtitleOut)
@@ -644,6 +651,8 @@ def video_to_out(video: Video, task_map: dict[str, str] | None = None) -> VideoO
         publish_time=video.publish_time,
         fetch_time=video.fetch_time,
         cover_url=video.cover_url,
+        video_url=f"https://www.bilibili.com/video/{video.bvid}",
+        views_delta_1d=getattr(video, "views_delta_1d", None),
         stats=stats,
         tags=tags,
         labels=video.tags or [],

@@ -5,7 +5,6 @@ import TaskFormPage from './pages/TaskFormPage'
 import RunsPage from './pages/RunsPage'
 import RunDetailPage from './pages/RunDetailPage'
 import VideosPage from './pages/VideosPage'
-import VideoDetailPage from './pages/VideoDetailPage'
 import SystemPage from './pages/SystemPage'
 
 export default function App() {
@@ -20,7 +19,6 @@ export default function App() {
         <Route path='/tasks/:id/runs' element={<RunsPage />} />
         <Route path='/runs/:runId' element={<RunDetailPage />} />
         <Route path='/videos' element={<VideosPage />} />
-        <Route path='/videos/:bvid' element={<VideoDetailPage />} />
         <Route path='/settings' element={<SystemPage />} />
         <Route path='/alerts' element={<Navigate to='/settings' replace />} />
         <Route path='/templates' element={<Navigate to='/settings' replace />} />

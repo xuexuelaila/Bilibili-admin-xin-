@@ -15,6 +15,35 @@ class Settings(BaseSettings):
     bili_user_agent: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     bili_referer: str = "https://www.bilibili.com"
     default_task_schedule_time: str = "09:00"
+    asr_provider: str = ""
+    asr_model: str = "base"
+    asr_language: str = "zh"
+    asr_device: str = "cpu"
+    asr_compute_type: str = "int8"
+    asr_ffmpeg_path: str | None = None
+    asr_max_audio_mb: int = 100
+    asr_transcode: bool = True
+    doubao_app_key: str | None = None
+    doubao_access_key: str | None = None
+    doubao_resource_id: str = "volc.bigasr.auc_turbo"
+    doubao_endpoint: str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"
+    doubao_submit_endpoint: str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
+    doubao_query_endpoint: str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
+    baidu_api_key: str | None = None
+    baidu_secret_key: str | None = None
+    baidu_token_endpoint: str = "https://aip.baidubce.com/oauth/2.0/token"
+    baidu_asr_endpoint: str = "https://vop.baidu.com/server_api"
+    baidu_dev_pid: int = 1537
+    baidu_cuid: str = "bili-admin"
+    baidu_segment_seconds: int = 55
+    tos_access_key: str | None = None
+    tos_secret_key: str | None = None
+    tos_endpoint: str | None = None
+    tos_region: str | None = None
+    tos_bucket: str | None = None
+    tos_prefix: str = "asr"
+    tos_public_base: str | None = None
+    tos_url_expires: int = 3600
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
