@@ -6,6 +6,10 @@ from app.models.task_video import TaskVideo
 from app.models.system_setting import SystemSetting
 from app.models.alert import Alert
 from app.models.task_template import TaskTemplate
+from app.models.cover_favorite import CoverFavorite
+from app.models.frame_job import FrameJob
+from app.models.frame_favorite import FrameFavorite
+from app.models.video_frame import VideoFrame
 
 __all__ = [
     "Task",
@@ -16,4 +20,8 @@ __all__ = [
     "SystemSetting",
     "Alert",
     "TaskTemplate",
+    "CoverFavorite",
+    "FrameJob",
+    "FrameFavorite",
+    "VideoFrame",
 ]

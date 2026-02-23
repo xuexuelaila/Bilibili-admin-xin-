@@ -1,5 +1,6 @@
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .page-header h1 { font-family: var(--font-display); margin: 0 0 6px; }
+.page-header .header-actions { display: flex; align-items: center; gap: 10px; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
 .metric-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; display: grid; gap: 10px; }
 .metric-card span { color: var(--muted); font-size: 12px; }

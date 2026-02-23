@@ -1,6 +1,22 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
+
+
+def _parse_hhmm(value: str, default: str = "03:00") -> tuple[int, int]:
+    raw = (value or "").strip()
+    if ":" not in raw:
+        raw = default
+    parts = raw.split(":")
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+    except ValueError:
+        hour, minute = 3, 0
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+    return hour, minute
 
 celery_app = Celery(
     "bili_admin",
@@ -10,13 +26,22 @@ celery_app = Celery(
 
 celery_app.autodiscover_tasks(["app.workers"])
 
+beat_schedule = {
+    "dispatch-due-tasks": {
+        "task": "dispatch_due_tasks",
+        "schedule": 60.0,
+    }
+}
+
+if settings.refresh_all_enabled:
+    hour, minute = _parse_hhmm(settings.refresh_all_time, default="03:00")
+    beat_schedule["refresh-all-videos"] = {
+        "task": "refresh_all_videos",
+        "schedule": crontab(hour=hour, minute=minute),
+    }
+
 celery_app.conf.update(
     task_track_started=True,
     timezone="UTC",
-    beat_schedule={
-        "dispatch-due-tasks": {
-            "task": "dispatch_due_tasks",
-            "schedule": 60.0,
-        }
-    },
+    beat_schedule=beat_schedule,
 )

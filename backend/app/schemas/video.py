@@ -14,6 +14,11 @@ class VideoOut(BaseModel):
     cover_url: str | None
     video_url: str | None = None
     views_delta_1d: int | None = None
+    is_favorited: bool = False
+    favorited_at: datetime | None = None
+    status_updated_at: datetime | None = None
+    is_cover_favorited: bool = False
+    cover_favorite_id: str | None = None
     stats: dict[str, Any]
     tags: dict[str, Any]
     labels: list[str]

@@ -4,7 +4,17 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import Task, Subtitle, Video
+import glob
+import os
+import shutil
+import subprocess
+import time
+import threading
+from pathlib import Path
+
+import httpx
+
+from app.models import Task, Subtitle, Video, FrameJob, VideoFrame
 from app.services.bili_client import MockBiliClient
 from app.services.bili_crawler import CrawlerBiliClient
 from app.services.asr_service import transcribe_audio_url
@@ -47,6 +57,95 @@ def dispatch_due_tasks():
             if not r.set(lock_key, "1", nx=True, ex=48 * 3600):
                 continue
             run_task.delay(task.id, trigger="schedule")
+    finally:
+        db.close()
+
+
+@celery_app.task(name="refresh_all_videos")
+def refresh_all_videos():
+    db = SessionLocal()
+    r = redis.Redis.from_url(settings.redis_url)
+    try:
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        lock_key = f"refresh_all_videos:{today}"
+        if not r.set(lock_key, "1", nx=True, ex=48 * 3600):
+            return {"status": "skipped", "reason": "already refreshed"}
+
+        client = _build_subtitle_client(db)
+        bvids = db.execute(select(Video.bvid)).scalars().all()
+        total = len(bvids)
+        if total == 0:
+            return {"status": "done", "total": 0, "updated": 0, "failed": 0}
+
+        updated = 0
+        failed = 0
+        batch_size = int(settings.refresh_all_batch_size or 50)
+        batch_size = max(1, batch_size)
+
+        for idx, bvid in enumerate(bvids, start=1):
+            video = db.get(Video, bvid)
+            if not video:
+                continue
+            try:
+                detail = client.get_video_detail(bvid) or {}
+                stats = detail.get("stats") or {}
+
+                new_views = int(stats.get("views", video.views) or 0)
+                old_views = int(video.views or 0)
+                video.views_delta_1d = max(0, new_views - old_views) if new_views >= 0 else None
+
+                video.views = new_views
+                video.like = int(stats.get("like", video.like) or 0)
+                video.fav = int(stats.get("fav", video.fav) or 0)
+                video.coin = int(stats.get("coin", video.coin) or 0)
+                video.reply = int(stats.get("reply", video.reply) or 0)
+                video.share = int(stats.get("share", video.share) or 0)
+
+                if video.views > 0:
+                    video.fav_rate = video.fav / video.views
+                    video.coin_rate = video.coin / video.views
+                    video.reply_rate = video.reply / video.views
+                else:
+                    video.fav_rate = 0.0
+                    video.coin_rate = 0.0
+                    video.reply_rate = 0.0
+
+                if detail.get("title"):
+                    video.title = detail.get("title") or video.title
+                if detail.get("cover_url"):
+                    video.cover_url = detail.get("cover_url") or video.cover_url
+                if detail.get("up_name"):
+                    video.up_name = detail.get("up_name") or video.up_name
+                if detail.get("up_id"):
+                    video.up_id = detail.get("up_id") or video.up_id
+                if detail.get("publish_time") and not video.publish_time:
+                    video.publish_time = detail.get("publish_time")
+
+                # Update follower count when possible (best-effort).
+                if video.up_id:
+                    try:
+                        up_info = client.get_up_info(video.up_id)
+                        if up_info and up_info.get("follower_count") is not None:
+                            video.follower_count = int(up_info.get("follower_count") or video.follower_count)
+                    except Exception:
+                        pass
+
+                if video.follower_count > 0:
+                    video.fav_fan_ratio = video.fav / video.follower_count
+                else:
+                    video.fav_fan_ratio = 0.0
+
+                video.fetch_time = datetime.utcnow()
+                db.add(video)
+                updated += 1
+            except Exception:
+                failed += 1
+
+            if idx % batch_size == 0:
+                db.commit()
+
+        db.commit()
+        return {"status": "done", "total": total, "updated": updated, "failed": failed}
     finally:
         db.close()
 
@@ -111,5 +210,211 @@ def extract_subtitle(bvid: str):
 
         _mark_subtitle(db, bvid, "failed", text=None, error="asr failed")
         return {"status": "failed", "error": "asr failed"}
+    finally:
+        db.close()
+
+
+def _frames_dir() -> Path:
+    base = Path(__file__).resolve().parents[2]
+    return base / (settings.frames_dir or "frames")
+
+
+def _bili_headers() -> dict[str, str]:
+    headers = {"User-Agent": settings.bili_user_agent, "Referer": settings.bili_referer}
+    if settings.bili_cookies:
+        headers["Cookie"] = settings.bili_cookies
+    return headers
+
+
+def _get_ffmpeg_bin() -> str:
+    ffmpeg_bin = settings.asr_ffmpeg_path or shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        try:
+            import imageio_ffmpeg
+
+            ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            ffmpeg_bin = None
+    if not ffmpeg_bin:
+        raise RuntimeError("ffmpeg not found (install imageio-ffmpeg or ffmpeg)")
+    return ffmpeg_bin
+
+
+def _download_video(url: str, out_path: str) -> None:
+    with httpx.stream("GET", url, headers=_bili_headers(), timeout=60) as res:
+        res.raise_for_status()
+        with open(out_path, "wb") as fp:
+            for chunk in res.iter_bytes():
+                fp.write(chunk)
+
+
+def _cleanup_old_jobs(db: SessionLocal, bvid: str, keep: int = 3):
+    jobs = (
+        db.execute(select(FrameJob).where(FrameJob.bvid == bvid, FrameJob.status == "success").order_by(FrameJob.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    if len(jobs) <= keep:
+        return
+    for job in jobs[keep:]:
+        frames = db.execute(select(VideoFrame).where(VideoFrame.job_id == job.id)).scalars().all()
+        for frame in frames:
+            try:
+                if os.path.exists(frame.frame_url):
+                    os.remove(frame.frame_url)
+            except OSError:
+                pass
+            db.delete(frame)
+        if job.output_dir and os.path.exists(job.output_dir):
+            try:
+                shutil.rmtree(job.output_dir)
+            except OSError:
+                pass
+        db.delete(job)
+    db.commit()
+
+
+@celery_app.task(name="extract_frames")
+def extract_frames(job_id: str):
+    db = SessionLocal()
+    try:
+        job = db.get(FrameJob, job_id)
+        if not job:
+            return {"error": "job not found"}
+        if job.status == "canceled":
+            return {"status": "canceled"}
+        job.status = "running"
+        job.updated_at = datetime.utcnow()
+        db.add(job)
+        db.commit()
+
+        video = db.get(Video, job.bvid)
+        if not video:
+            job.status = "failed"
+            job.error_msg = "VIDEO_SOURCE_NOT_AVAILABLE"
+            db.commit()
+            return {"status": "failed"}
+
+        output_dir = _frames_dir() / job.bvid / job.id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        job.output_dir = str(output_dir)
+        db.commit()
+
+        source_path = job.source_video_path or video.source_video_path
+        if not source_path or not os.path.exists(source_path):
+            client = _build_subtitle_client(db)
+            video_url = client.get_video_url(job.bvid)
+            if not video_url:
+                job.status = "failed"
+                job.error_msg = "VIDEO_SOURCE_NOT_AVAILABLE"
+                db.commit()
+                return {"status": "failed"}
+            source_path = str(output_dir / "source.mp4")
+            _download_video(video_url, source_path)
+            job.source_video_path = source_path
+            db.commit()
+
+        width = 1280 if job.resolution == "720p" else 1920
+        max_frames = min(job.max_frames or 120, 300)
+        ffmpeg_bin = _get_ffmpeg_bin()
+
+        if job.mode == "interval":
+            interval = max(int(job.interval_sec or 2), 1)
+            out_pattern = str(output_dir / "frame_%05d.jpg")
+            vf = f"fps=1/{interval},scale={width}:-1"
+            cmd = [ffmpeg_bin, "-y", "-i", source_path, "-vf", vf, "-frames:v", str(max_frames), "-q:v", "2", out_pattern]
+        else:
+            threshold = float(job.scene_threshold or 0.35)
+            out_pattern = str(output_dir / "frame_%05d.jpg")
+            vf = f"select='gt(scene,{threshold})',showinfo,scale={width}:-1"
+            cmd = [ffmpeg_bin, "-y", "-i", source_path, "-vf", vf, "-vsync", "vfr", "-frames:v", str(max_frames), "-q:v", "2", out_pattern]
+
+        pts_times: list[float] = []
+
+        def _collect_pts(stream):
+            for line in stream:
+                if "pts_time:" in line:
+                    try:
+                        part = line.split("pts_time:")[1]
+                        value = part.split(" ")[0].strip()
+                        pts_times.append(float(value))
+                    except Exception:
+                        continue
+
+        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        reader = None
+        if process.stderr:
+            reader = threading.Thread(target=_collect_pts, args=(process.stderr,), daemon=True)
+            reader.start()
+
+        while process.poll() is None:
+            job = db.get(FrameJob, job_id)
+            if job and job.status == "canceled":
+                process.terminate()
+                process.wait(timeout=5)
+                db.commit()
+                return {"status": "canceled"}
+            count = len(glob.glob(str(output_dir / "*.jpg")))
+            job.generated_frames = count
+            job.frame_count = count
+            job.progress = min(count / max_frames, 1.0) if max_frames else None
+            job.updated_at = datetime.utcnow()
+            db.add(job)
+            db.commit()
+            time.sleep(0.6)
+
+        if reader:
+            reader.join(timeout=2)
+
+        if process.returncode != 0:
+            job = db.get(FrameJob, job_id)
+            job.status = "failed"
+            job.error_msg = "ffmpeg failed"
+            db.commit()
+            return {"status": "failed"}
+
+        frame_files = sorted(glob.glob(str(output_dir / "*.jpg")))
+        if not frame_files:
+            job = db.get(FrameJob, job_id)
+            job.status = "failed"
+            job.error_msg = "NO_FRAMES"
+            db.commit()
+            return {"status": "failed"}
+
+        frames = []
+        for idx, path in enumerate(frame_files, start=1):
+            if job.mode == "interval":
+                ts = int((idx - 1) * (job.interval_sec or 2) * 1000)
+            else:
+                ts = int(pts_times[idx - 1] * 1000) if idx - 1 < len(pts_times) else None
+            frames.append(
+                VideoFrame(
+                    job_id=job.id,
+                    bvid=job.bvid,
+                    idx=idx,
+                    timestamp_ms=ts,
+                    frame_url=path,
+                )
+            )
+
+        db.add_all(frames)
+        job = db.get(FrameJob, job_id)
+        job.status = "success"
+        job.generated_frames = len(frame_files)
+        job.frame_count = len(frame_files)
+        job.progress = 1.0
+        job.updated_at = datetime.utcnow()
+        db.add(job)
+        db.commit()
+
+        _cleanup_old_jobs(db, job.bvid)
+        return {"status": "success", "frames": len(frame_files)}
+    except Exception as exc:  # noqa: BLE001
+        job = db.get(FrameJob, job_id) if db else None
+        if job:
+            job.status = "failed"
+            job.error_msg = str(exc)
+            db.commit()
+        return {"status": "failed", "error": str(exc)}
     finally:
         db.close()

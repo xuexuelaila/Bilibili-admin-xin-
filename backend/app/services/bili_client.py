@@ -28,6 +28,9 @@ class BiliClient:
     def get_audio_url(self, bvid: str) -> str | None:
         raise NotImplementedError
 
+    def get_video_url(self, bvid: str) -> str | None:
+        raise NotImplementedError
+
 
 class MockBiliClient(BiliClient):
     def search_videos(self, keyword: str, days_limit: int, fetch_limit: int, search_sort: str, partitions=None):
@@ -46,4 +49,7 @@ class MockBiliClient(BiliClient):
         return None
 
     def get_audio_url(self, bvid: str) -> str | None:
+        return None
+
+    def get_video_url(self, bvid: str) -> str | None:
         return None

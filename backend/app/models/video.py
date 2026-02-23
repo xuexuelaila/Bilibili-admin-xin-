@@ -22,6 +22,7 @@ class Video(Base):
     cover_url = Column(String(500), nullable=True)
 
     views = Column(Integer, nullable=False, default=0)
+    views_delta_1d = Column(Integer, nullable=True)
     like = Column(Integer, nullable=False, default=0)
     fav = Column(Integer, nullable=False, default=0)
     coin = Column(Integer, nullable=False, default=0)
@@ -39,6 +40,10 @@ class Video(Base):
     low_fan_hot_reason = Column(JSON, nullable=False, default=list)
 
     process_status = Column(String(20), nullable=False, default="todo")
+    status_updated_at = Column(DateTime, nullable=True)
+    is_favorited = Column(Boolean, nullable=False, default=False)
+    favorited_at = Column(DateTime, nullable=True)
+    source_video_path = Column(String(500), nullable=True)
     note = Column(Text, nullable=True)
 
     tags = Column(JSON, nullable=False, default=list)

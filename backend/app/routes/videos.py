@@ -2,6 +2,7 @@ import csv
 import io
 import os
 import zipfile
+import json
 from urllib.parse import urlparse
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,11 +12,10 @@ from sqlalchemy import select, func, or_, String, cast, case
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Video, TaskVideo, Subtitle, Task
+from app.models import Video, TaskVideo, Subtitle, Task, CoverFavorite
 from app.schemas.video import VideoOut
 from app.schemas.subtitle import SubtitleOut
 from app.schemas.pagination import Page
-from app.services.bili_client import MockBiliClient
 from app.core.config import settings
 from app.workers.tasks import extract_subtitle as celery_extract_subtitle
 
@@ -29,6 +29,8 @@ def list_videos(
     task_id: str | None = None,
     tag: str | None = None,
     process_status: str | None = None,
+    status: str | None = None,
+    is_favorited: bool | None = None,
     labels: str | None = None,
     tags: str | None = None,
     publish_from: str | None = None,
@@ -57,8 +59,15 @@ def list_videos(
         query = query.where(Video.basic_hot == True)  # noqa: E712
     if tag == "low_fan_hot":
         query = query.where(Video.low_fan_hot == True)  # noqa: E712
-    if process_status:
-        query = query.where(Video.process_status == process_status)
+    status_param = status or process_status
+    if status_param and status_param != "all":
+        status_list = [s.strip() for s in status_param.split(",") if s.strip()]
+        if len(status_list) == 1:
+            query = query.where(Video.process_status == status_list[0])
+        else:
+            query = query.where(Video.process_status.in_(status_list))
+    if is_favorited is not None:
+        query = query.where(Video.is_favorited == is_favorited)
     label_list: list[str] = []
     if labels:
         label_list.extend([l.strip() for l in labels.split(",") if l.strip()])
@@ -70,7 +79,16 @@ def list_videos(
         for item in label_list:
             if item.lower() not in [d.lower() for d in deduped]:
                 deduped.append(item)
-        conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in deduped]
+        conditions = []
+        for item in deduped:
+            raw = item.lower()
+            conditions.append(lowered.like(f'%"{raw}"%'))
+            try:
+                escaped = json.dumps(item, ensure_ascii=True)[1:-1].lower()
+                if escaped != raw:
+                    conditions.append(lowered.like(f'%"{escaped}"%'))
+            except Exception:
+                pass
         query = query.where(or_(*conditions))
 
     if publish_from:
@@ -122,7 +140,13 @@ def list_videos(
             return (null_flag.asc(), col.asc())
         return (null_flag.asc(), col.desc())
 
-    if sort == "views_delta_1d":
+    if sort in {"favorited_at", "status_updated_at"}:
+        col = getattr(Video, sort, None)
+        if col is not None:
+            query = query.order_by(*_order_with_nulls_last(col))
+        else:
+            query = query.order_by(Video.publish_time.desc())
+    elif sort == "views_delta_1d":
         delta_col = getattr(Video, "views_delta_1d", None)
         if delta_col is not None:
             query = query.order_by(*_order_with_nulls_last(delta_col))
@@ -150,7 +174,13 @@ def list_videos(
         task_rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
         task_map = {t.id: t.name for t in task_rows}
 
-    items = [video_to_out(v, task_map) for v in rows]
+    cover_map = {}
+    if rows:
+        bvids = [v.bvid for v in rows]
+        covers = db.execute(select(CoverFavorite).where(CoverFavorite.bvid.in_(bvids))).scalars().all()
+        cover_map = {c.bvid: c for c in covers}
+
+    items = [video_to_out(v, task_map, cover_map.get(v.bvid)) for v in rows]
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
@@ -204,7 +234,16 @@ def export_csv(
         for item in label_list:
             if item.lower() not in [d.lower() for d in deduped]:
                 deduped.append(item)
-        conditions = [lowered.like(f"%\\\"{l.lower()}\\\"%") for l in deduped]
+        conditions = []
+        for item in deduped:
+            raw = item.lower()
+            conditions.append(lowered.like(f'%"{raw}"%'))
+            try:
+                escaped = json.dumps(item, ensure_ascii=True)[1:-1].lower()
+                if escaped != raw:
+                    conditions.append(lowered.like(f'%"{escaped}"%'))
+            except Exception:
+                pass
         query = query.where(or_(*conditions))
 
     if publish_from:
@@ -354,14 +393,72 @@ def export_csv(
 def batch_update_status(payload: dict, db: Session = Depends(get_db)):
     bvids = payload.get("bvids") or []
     status = payload.get("process_status")
-    if status not in {"todo", "done"}:
+    allowed = {"todo", "to_shoot", "shot", "published", "dropped"}
+    if status not in allowed:
         raise HTTPException(status_code=400, detail="invalid status")
     if not isinstance(bvids, list) or not bvids:
         raise HTTPException(status_code=400, detail="bvids cannot be empty")
 
     rows = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    now = datetime.utcnow()
     for v in rows:
         v.process_status = status
+        v.status_updated_at = now
+    db.commit()
+    return {"ok": True, "updated": len(rows)}
+
+
+@router.post("/batch/status")
+def batch_update_status_v2(payload: dict, db: Session = Depends(get_db)):
+    bvids = payload.get("bvids") or []
+    status = payload.get("process_status")
+    allowed = {"todo", "to_shoot", "shot", "published", "dropped"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail="invalid status")
+    if not isinstance(bvids, list) or not bvids:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    rows = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    now = datetime.utcnow()
+    for v in rows:
+        v.process_status = status
+        v.status_updated_at = now
+    db.commit()
+    return {"updated": len(rows)}
+
+
+@router.post("/batch/favorite")
+def batch_favorite_v2(payload: dict, db: Session = Depends(get_db)):
+    bvids = payload.get("bvids") or []
+    is_favorited = payload.get("is_favorited")
+    if not isinstance(is_favorited, bool):
+        raise HTTPException(status_code=400, detail="is_favorited must be boolean")
+    if not isinstance(bvids, list) or not bvids:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    rows = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    now = datetime.utcnow()
+    for v in rows:
+        v.is_favorited = is_favorited
+        v.favorited_at = now if is_favorited else None
+    db.commit()
+    return {"updated": len(rows)}
+
+
+@router.post("/favorite/batch")
+def batch_favorite(payload: dict, db: Session = Depends(get_db)):
+    bvids = payload.get("bvids") or []
+    is_favorited = payload.get("is_favorited")
+    if not isinstance(is_favorited, bool):
+        raise HTTPException(status_code=400, detail="is_favorited must be boolean")
+    if not isinstance(bvids, list) or not bvids:
+        raise HTTPException(status_code=400, detail="bvids cannot be empty")
+
+    rows = db.execute(select(Video).where(Video.bvid.in_(bvids))).scalars().all()
+    now = datetime.utcnow()
+    for v in rows:
+        v.is_favorited = is_favorited
+        v.favorited_at = now if is_favorited else None
     db.commit()
     return {"ok": True, "updated": len(rows)}
 
@@ -504,7 +601,8 @@ def get_video(bvid: str, db: Session = Depends(get_db)):
     if task_ids:
         task_rows = db.execute(select(Task).where(Task.id.in_(list(task_ids)))).scalars().all()
         task_map = {t.id: t.name for t in task_rows}
-    return video_to_out(video, task_map)
+    cover = db.execute(select(CoverFavorite).where(CoverFavorite.bvid == video.bvid)).scalars().first()
+    return video_to_out(video, task_map, cover)
 
 
 @router.get("/{bvid}/cover")
@@ -535,9 +633,26 @@ def update_process_status(bvid: str, payload: dict, db: Session = Depends(get_db
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     status = payload.get("process_status")
-    if status not in {"todo", "done"}:
+    allowed = {"todo", "to_shoot", "shot", "published", "dropped"}
+    if status not in allowed:
         raise HTTPException(status_code=400, detail="invalid status")
     video.process_status = status
+    video.status_updated_at = datetime.utcnow()
+    db.add(video)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{bvid}/favorite")
+def update_favorite(bvid: str, payload: dict, db: Session = Depends(get_db)):
+    video = db.get(Video, bvid)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    is_favorited = payload.get("is_favorited")
+    if not isinstance(is_favorited, bool):
+        raise HTTPException(status_code=400, detail="is_favorited must be boolean")
+    video.is_favorited = is_favorited
+    video.favorited_at = datetime.utcnow() if is_favorited else None
     db.add(video)
     db.commit()
     return {"ok": True}
@@ -624,7 +739,11 @@ def download_cover(bvid: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail="cover download failed")
 
 
-def video_to_out(video: Video, task_map: dict[str, str] | None = None) -> VideoOut:
+def video_to_out(
+    video: Video,
+    task_map: dict[str, str] | None = None,
+    cover: CoverFavorite | None = None,
+) -> VideoOut:
     task_map = task_map or {}
     stats = {
         "views": video.views,
@@ -653,6 +772,11 @@ def video_to_out(video: Video, task_map: dict[str, str] | None = None) -> VideoO
         cover_url=video.cover_url,
         video_url=f"https://www.bilibili.com/video/{video.bvid}",
         views_delta_1d=getattr(video, "views_delta_1d", None),
+        is_favorited=bool(video.is_favorited),
+        favorited_at=video.favorited_at,
+        status_updated_at=video.status_updated_at,
+        is_cover_favorited=bool(cover.id) if cover else False,
+        cover_favorite_id=cover.id if cover else None,
         stats=stats,
         tags=tags,
         labels=video.tags or [],

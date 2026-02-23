@@ -9,6 +9,8 @@ from app.routes.settings import router as settings_router
 from app.routes.alerts import router as alerts_router
 from app.routes.templates import router as templates_router
 from app.routes.tags import router as tags_router
+from app.routes.covers import router as covers_router
+from app.routes.frames import router as frames_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -20,3 +22,5 @@ api_router.include_router(tags_router, tags=["tags"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(runs_router, tags=["runs"])
 api_router.include_router(videos_router, prefix="/videos", tags=["videos"])
+api_router.include_router(covers_router, prefix="/covers", tags=["covers"])
+api_router.include_router(frames_router, tags=["frames"])

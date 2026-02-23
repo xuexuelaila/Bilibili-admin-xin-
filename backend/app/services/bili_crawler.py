@@ -201,6 +201,35 @@ class CrawlerBiliClient(BiliClient):
                 return first.get("url")
         return None
 
+    def get_video_url(self, bvid: str) -> str | None:
+        detail = self.get_video_detail(bvid)
+        cid = detail.get("cid")
+        if not cid:
+            return None
+        url = "https://api.bilibili.com/x/player/playurl"
+        params = {"bvid": bvid, "cid": cid, "fnval": 16}
+        data = self._request_json(url, params)
+        if not data:
+            return None
+        payload = data.get("data") if isinstance(data, dict) else {}
+        if not isinstance(payload, dict):
+            return None
+        dash = payload.get("dash")
+        if isinstance(dash, dict):
+            videos = dash.get("video") if isinstance(dash.get("video"), list) else []
+            if videos:
+                best = max(videos, key=lambda item: item.get("bandwidth", 0) if isinstance(item, dict) else 0)
+                if isinstance(best, dict):
+                    base_url = best.get("baseUrl") or best.get("base_url")
+                    if base_url:
+                        return base_url
+        durl = payload.get("durl")
+        if isinstance(durl, list) and durl:
+            first = durl[0]
+            if isinstance(first, dict):
+                return first.get("url")
+        return None
+
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         for attempt in range(self.retry_times + 1):
             try:

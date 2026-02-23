@@ -82,6 +82,7 @@ export default function TasksPage() {
   const timersRef = useRef<Record<string, number>>({})
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [tagOptions, setTagOptions] = useState<string[]>([])
+  const [refreshingAll, setRefreshingAll] = useState(false)
   const basicHotTip = '爆款=命中基础爆款规则。默认：播放>=100000 或 收藏>=1500 或 投币>=500 或 评论>=200。以任务规则为准。'
   const lowFanTip = '低粉爆款=命中低粉规则。默认：粉丝<=50000、播放>=30000、收藏率>=0.012、投币率>=0.0025、评论率>=0.002、收藏/粉丝>=0.02（需全部满足）。以任务规则为准。'
 
@@ -160,6 +161,19 @@ export default function TasksPage() {
     await load()
   }
 
+  const refreshAllVideos = async () => {
+    if (refreshingAll) return
+    setRefreshingAll(true)
+    try {
+      await api.post('/api/tasks/refresh_all')
+      window.alert('已触发“全量刷新”，后台正在更新视频数据。')
+    } catch {
+      window.alert('触发失败，请稍后重试。')
+    } finally {
+      setRefreshingAll(false)
+    }
+  }
+
   const startProgress = (id: string) => {
     if (timersRef.current[id]) return
     setRunningMap((prev) => ({ ...prev, [id]: 5 }))
@@ -210,7 +224,12 @@ export default function TasksPage() {
           <h1>任务管理</h1>
           <p>每天定时抓取并筛选爆款/低粉带货爆款。</p>
         </div>
-        <Link to='/tasks/new' className='btn primary'>新建任务</Link>
+        <div className='header-actions'>
+          <button className='btn ghost' onClick={refreshAllVideos} disabled={refreshingAll}>
+            {refreshingAll ? '刷新中...' : '一键刷新视频'}
+          </button>
+          <Link to='/tasks/new' className='btn primary'>新建任务</Link>
+        </div>
       </header>
 
       {metrics && (

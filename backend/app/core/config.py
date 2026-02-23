@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     bili_user_agent: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     bili_referer: str = "https://www.bilibili.com"
     default_task_schedule_time: str = "09:00"
+    refresh_all_enabled: bool = True
+    refresh_all_time: str = "03:00"
+    refresh_all_batch_size: int = 50
     asr_provider: str = ""
     asr_model: str = "base"
     asr_language: str = "zh"
@@ -44,6 +47,7 @@ class Settings(BaseSettings):
     tos_prefix: str = "asr"
     tos_public_base: str | None = None
     tos_url_expires: int = 3600
+    frames_dir: str = "frames"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

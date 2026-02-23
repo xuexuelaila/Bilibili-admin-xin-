@@ -30,8 +30,21 @@ def init_db() -> None:
 def _ensure_sqlite_columns() -> None:
     with engine.begin() as conn:
         tables = {
-            "tasks": ["tags"],
-            "videos": ["tags"],
+            "tasks": {"tags": "TEXT"},
+            "videos": {
+                "tags": "TEXT",
+                "views_delta_1d": "INTEGER",
+                "status_updated_at": "DATETIME",
+                "is_favorited": "BOOLEAN DEFAULT 0",
+                "favorited_at": "DATETIME",
+                "source_video_path": "TEXT",
+            },
+            "frame_jobs": {
+                "frame_count": "INTEGER DEFAULT 0",
+            },
+            "video_frames": {
+                "thumb_url": "TEXT",
+            },
         }
         for table, columns in tables.items():
             exists = conn.execute(
@@ -42,9 +55,9 @@ def _ensure_sqlite_columns() -> None:
                 continue
             rows = conn.execute(text(f"PRAGMA table_info({table})")).mappings().all()
             existing = {row["name"] for row in rows}
-            for column in columns:
+            for column, column_type in columns.items():
                 if column not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TEXT DEFAULT '[]'"))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"))
             if "tags" in columns and "tags" in existing:
                 conn.execute(text(f"UPDATE {table} SET tags='[]' WHERE tags IS NULL"))
 

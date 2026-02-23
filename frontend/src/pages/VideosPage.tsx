@@ -21,6 +21,11 @@ interface Video {
   cover_url: string | null
   video_url?: string | null
   views_delta_1d?: number | null
+  is_favorited?: boolean
+  favorited_at?: string | null
+  status_updated_at?: string | null
+  is_cover_favorited?: boolean
+  cover_favorite_id?: string | null
   stats: { views: number; fav: number; coin: number; reply: number; fav_rate: number; coin_rate: number; reply_rate: number; fav_fan_ratio: number }
   tags: { basic_hot: { is_hit: boolean }; low_fan_hot: { is_hit: boolean } }
   labels: string[]
@@ -33,6 +38,24 @@ interface SubtitleState {
   error?: string
   errorDetail?: string
   updatedAt?: string
+}
+
+interface FrameJobState {
+  id: string
+  status: 'pending' | 'running' | 'success' | 'failed' | 'canceled'
+  progress?: number | null
+  generated_frames?: number
+  frame_count?: number
+  error_msg?: string | null
+  output_dir?: string | null
+}
+
+interface FrameItem {
+  id: string
+  idx: number
+  timestamp_ms: number | null
+  frame_url: string
+  is_favorited?: boolean
 }
 
 const formatCount = (value: number) => {
@@ -55,6 +78,9 @@ export default function VideosPage() {
   const [minViews, setMinViews] = useState('')
   const [sortKey, setSortKey] = useState('publish_time')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [favoritedOnly, setFavoritedOnly] = useState(false)
+  const [statusTab, setStatusTab] = useState('todo')
+  const [bulkStatus, setBulkStatus] = useState('todo')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
@@ -65,7 +91,27 @@ export default function VideosPage() {
   const [subtitleSearch, setSubtitleSearch] = useState('')
   const [subtitleMap, setSubtitleMap] = useState<Record<string, SubtitleState>>({})
   const [toast, setToast] = useState<string | null>(null)
+  const [frameModal, setFrameModal] = useState<string | null>(null)
+  const [frameVideo, setFrameVideo] = useState<Video | null>(null)
+  const [frameMode, setFrameMode] = useState<'scene' | 'interval'>('scene')
+  const [frameInterval, setFrameInterval] = useState(2)
+  const [frameThreshold, setFrameThreshold] = useState(0.35)
+  const [frameMax, setFrameMax] = useState(120)
+  const [frameResolution, setFrameResolution] = useState<'720p' | '1080p'>('720p')
+  const [frameJob, setFrameJob] = useState<FrameJobState | null>(null)
+  const [frameItems, setFrameItems] = useState<FrameItem[]>([])
+  const [framePage, setFramePage] = useState(1)
+  const [frameTotal, setFrameTotal] = useState(0)
+  const [frameSubmitting, setFrameSubmitting] = useState(false)
+  const [framePreviewIndex, setFramePreviewIndex] = useState<number | null>(null)
+  const [frameOnlyFavorited, setFrameOnlyFavorited] = useState(false)
+  const [frameSelected, setFrameSelected] = useState<string[]>([])
+  const [showFrameConfig, setShowFrameConfig] = useState(false)
+  const [tagModal, setTagModal] = useState<Video | null>(null)
+  const [tagDraft, setTagDraft] = useState<string[]>([])
+  const [tagSaving, setTagSaving] = useState(false)
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  const framePageSize = 80
 
   const load = async () => {
     setLoading(true)
@@ -74,6 +120,8 @@ export default function VideosPage() {
     if (publishFrom) params.set('publish_from', publishFrom)
     if (publishTo) params.set('publish_to', publishTo)
     if (minViews) params.set('min_views', minViews)
+    if (favoritedOnly) params.set('is_favorited', 'true')
+    if (statusTab && statusTab !== 'all') params.set('status', statusTab)
     if (sortKey) params.set('sort', sortKey)
     if (sortOrder) params.set('order', sortOrder)
     params.set('page', String(page))
@@ -86,7 +134,7 @@ export default function VideosPage() {
 
   useEffect(() => {
     load()
-  }, [labels, publishFrom, publishTo, minViews, sortKey, sortOrder, page, pageSize])
+  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
@@ -94,15 +142,25 @@ export default function VideosPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [labels, publishFrom, publishTo, minViews, sortKey, sortOrder])
+  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder])
 
   useEffect(() => {
     setSelected([])
-  }, [labels, publishFrom, publishTo, minViews, sortKey, sortOrder, page, pageSize])
+  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     setCoverError({})
   }, [videos])
+
+  useEffect(() => {
+    if (framePreviewIndex !== null && framePreviewIndex >= frameItems.length) {
+      setFramePreviewIndex(null)
+    }
+  }, [frameItems, framePreviewIndex])
+
+  useEffect(() => {
+    setFrameSelected([])
+  }, [frameItems])
 
   const allSelected = videos.length > 0 && selected.length === videos.length
 
@@ -114,11 +172,19 @@ export default function VideosPage() {
     setSelected(allSelected ? [] : videos.map((v) => v.bvid))
   }
 
-  const batchUpdateStatus = async (status: 'todo' | 'done') => {
+  const batchUpdateStatusV2 = async () => {
     if (selected.length === 0) return
-    await api.post('/api/videos/process_status/batch', { bvids: selected, process_status: status })
+    await api.post('/api/videos/batch/status', { bvids: selected, process_status: bulkStatus })
     await load()
     setSelected([])
+  }
+
+  const batchFavorite = async (next: boolean) => {
+    if (selected.length === 0) return
+    await api.post('/api/videos/batch/favorite', { bvids: selected, is_favorited: next })
+    await load()
+    setSelected([])
+    showToast(next ? '已收藏' : '已取消收藏')
   }
 
   const batchExtractSubtitles = async () => {
@@ -155,6 +221,192 @@ export default function VideosPage() {
     window.setTimeout(() => setToast(null), 2000)
   }
 
+  const openFrameModal = async (video: Video) => {
+    setFrameModal(video.bvid)
+    setFrameVideo(video)
+    setFrameJob(null)
+    setFrameItems([])
+    setFramePage(1)
+    setFrameTotal(0)
+    setFrameOnlyFavorited(false)
+    setShowFrameConfig(false)
+    setFrameSelected([])
+    await loadLatestFrameJob(video.bvid)
+  }
+
+  const closeFrameModal = () => {
+    setFrameModal(null)
+    setFrameVideo(null)
+    setFrameJob(null)
+    setFrameItems([])
+    setFramePage(1)
+    setFrameTotal(0)
+    setFramePreviewIndex(null)
+    setFrameOnlyFavorited(false)
+    setFrameSelected([])
+    setShowFrameConfig(false)
+  }
+
+  const loadLatestFrameJob = async (bvid: string) => {
+    try {
+      const res = await api.get(`/api/videos/${bvid}/frame_jobs`)
+      const job = res.data?.job
+      if (!job) {
+        setFrameJob(null)
+        return null
+      }
+      setFrameJob(job)
+      if (job.status === 'success') {
+        await fetchFrames(job.id, 1)
+      }
+      return job
+    } catch {
+      setFrameJob(null)
+      return null
+    }
+  }
+
+  const startFrameJob = async (bvid: string) => {
+    try {
+      if (frameVideo && frameVideo.process_status !== 'to_shoot') {
+        showToast('请先将视频标记为「待拍摄」后再拆解')
+        return
+      }
+      setFrameSubmitting(true)
+      setFrameItems([])
+      setFramePage(1)
+      setFrameTotal(0)
+      const payload: Record<string, unknown> = {
+        mode: frameMode,
+        max_frames: Math.min(Math.max(frameMax || 120, 1), 300),
+        resolution: frameResolution,
+      }
+      if (frameMode === 'interval') payload.interval_sec = frameInterval
+      if (frameMode === 'scene') payload.scene_threshold = frameThreshold
+      const res = await api.post(`/api/videos/${bvid}/frame_jobs`, payload)
+      setFrameJob({ id: res.data.job_id, status: 'pending', progress: 0, generated_frames: 0 })
+      setShowFrameConfig(false)
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || '创建任务失败'
+      if (detail === 'VIDEO_NOT_TO_SHOOT') {
+        showToast('请先将视频标记为「待拍摄」后再拆解')
+      } else {
+        showToast(detail)
+      }
+    } finally {
+      setFrameSubmitting(false)
+    }
+  }
+
+  const fetchFrameJob = async (jobId: string) => {
+    const res = await api.get(`/api/frame_jobs/${jobId}`)
+    setFrameJob(res.data)
+    return res.data
+  }
+
+  const fetchFrames = async (jobId: string, pageNum = 1, onlyFavorited = frameOnlyFavorited) => {
+    const res = await api.get(
+      `/api/frame_jobs/${jobId}/frames?page=${pageNum}&page_size=${framePageSize}&only_favorited=${onlyFavorited ? 'true' : 'false'}`
+    )
+    setFrameItems(res.data.items || [])
+    setFrameTotal(res.data.total || 0)
+  }
+
+  const cancelFrameJob = async (jobId: string) => {
+    await api.post(`/api/frame_jobs/${jobId}/cancel`)
+    await fetchFrameJob(jobId)
+  }
+
+  useEffect(() => {
+    if (!frameJob?.id) return
+    if (frameJob.status === 'running' || frameJob.status === 'pending') {
+      const timer = window.setInterval(async () => {
+        const data = await fetchFrameJob(frameJob.id)
+        if (data.status === 'success') {
+          await fetchFrames(frameJob.id, 1, frameOnlyFavorited)
+        }
+      }, 1500)
+      return () => window.clearInterval(timer)
+    }
+    if (frameJob.status === 'success') {
+      fetchFrames(frameJob.id, framePage, frameOnlyFavorited)
+    }
+  }, [frameJob?.id, frameJob?.status, framePage, frameOnlyFavorited])
+
+  const updateFavorite = async (video: Video) => {
+    const next = !video.is_favorited
+    await api.post(`/api/videos/${video.bvid}/favorite`, { is_favorited: next })
+    setVideos((prev) =>
+      prev.map((v) =>
+        v.bvid === video.bvid
+          ? {
+              ...v,
+              is_favorited: next,
+              favorited_at: next ? new Date().toISOString() : null,
+            }
+          : v
+      )
+    )
+    showToast(next ? '已收藏' : '已取消收藏')
+  }
+
+  const updateCoverFavorite = async (video: Video) => {
+    const isOn = Boolean(video.is_cover_favorited)
+    if (isOn && video.cover_favorite_id) {
+      await api.post('/api/covers/unfavorite', { id: video.cover_favorite_id })
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.bvid === video.bvid
+            ? { ...v, is_cover_favorited: false, cover_favorite_id: null }
+            : v
+        )
+      )
+      showToast('已取消封面收藏')
+      return
+    }
+    const res = await api.post('/api/covers/favorite', {
+      bvid: video.bvid,
+      cover_url: video.cover_url,
+    })
+    if (res.data?.ok === false && res.data?.reason === 'duplicate') {
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.bvid === video.bvid
+            ? { ...v, is_cover_favorited: true, cover_favorite_id: res.data?.id || v.cover_favorite_id }
+            : v
+        )
+      )
+      showToast('已在封面库')
+      return
+    }
+    setVideos((prev) =>
+      prev.map((v) =>
+        v.bvid === video.bvid
+          ? { ...v, is_cover_favorited: true, cover_favorite_id: res.data?.id || v.cover_favorite_id }
+          : v
+      )
+    )
+    showToast('已收藏封面')
+  }
+
+  const updateProcessStatus = async (video: Video, status: string) => {
+    await api.post(`/api/videos/${video.bvid}/process_status`, { process_status: status })
+    setVideos((prev) => {
+      if (statusTab !== 'all' && statusTab !== status) {
+        return prev.filter((v) => v.bvid !== video.bvid)
+      }
+      return prev.map((v) =>
+        v.bvid === video.bvid
+          ? {
+              ...v,
+              process_status: status,
+              status_updated_at: new Date().toISOString(),
+            }
+          : v
+      )
+    })
+  }
+
   const fetchSubtitle = async (bvid: string) => {
     try {
       const res = await api.get(`/api/videos/${bvid}/subtitle`)
@@ -173,7 +425,7 @@ export default function VideosPage() {
     }
   }
 
-  const pollSubtitle = async (bvid: string, attempts = 10, interval = 1500) => {
+  const pollSubtitle = async (bvid: string, attempts = 60, interval = 2000) => {
     for (let i = 0; i < attempts; i++) {
       try {
         const res = await api.get(`/api/videos/${bvid}/subtitle`)
@@ -205,8 +457,14 @@ export default function VideosPage() {
     try {
       const text = await pollSubtitle(bvid)
       return text || ''
-    } catch {
-      updateSubtitleState(bvid, { status: 'failed' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('超时')) {
+        // Keep showing extracting; the backend job may still be running.
+        updateSubtitleState(bvid, { status: 'extracting' })
+      } else {
+        updateSubtitleState(bvid, { status: 'failed' })
+      }
     }
     return ''
   }
@@ -270,7 +528,7 @@ export default function VideosPage() {
     })
   }
 
-  const canClear = labels.length > 0 || !!publishFrom || !!publishTo || quickDays !== null || customDate || !!minViews || sortKey !== 'publish_time' || sortOrder !== 'desc'
+  const canClear = labels.length > 0 || !!publishFrom || !!publishTo || quickDays !== null || customDate || !!minViews || favoritedOnly || statusTab !== 'todo' || sortKey !== 'publish_time' || sortOrder !== 'desc'
 
   const getVideoUrl = (video: Video) => {
     if (video.video_url) return video.video_url
@@ -291,9 +549,33 @@ export default function VideosPage() {
     setCustomDate(false)
     setDateRange(undefined)
     setMinViews('')
+    setFavoritedOnly(false)
+    setStatusTab('todo')
     setSortKey('publish_time')
     setSortOrder('desc')
   }
+
+  const statusOptions = [
+    { value: 'todo', label: '待处理' },
+    { value: 'to_shoot', label: '待拍摄' },
+    { value: 'shot', label: '已拍摄' },
+    { value: 'published', label: '已发布' },
+    { value: 'dropped', label: '淘汰' },
+  ]
+
+  const statusLabelMap = statusOptions.reduce<Record<string, string>>((acc, item) => {
+    acc[item.value] = item.label
+    return acc
+  }, {})
+
+  const statusTabs = [
+    { value: 'todo', label: '待处理' },
+    { value: 'to_shoot', label: '待拍摄' },
+    { value: 'shot', label: '已拍摄' },
+    { value: 'published', label: '已发布' },
+    { value: 'dropped', label: '淘汰' },
+    { value: 'all', label: '全部' },
+  ]
 
   const applyRange = (range?: DateRange) => {
     setDateRange(range)
@@ -412,6 +694,118 @@ export default function VideosPage() {
     return text.replace(/\s+/g, '').length
   }
 
+  const formatTimestamp = (ms?: number | null) => {
+    if (ms === null || ms === undefined) return ''
+    const total = Math.max(0, Math.floor(ms / 1000))
+    const mm = String(Math.floor(total / 60)).padStart(2, '0')
+    const ss = String(total % 60).padStart(2, '0')
+    return `${mm}:${ss}`
+  }
+
+  const toggleFrameSelect = (frameId: string) => {
+    setFrameSelected((prev) => (prev.includes(frameId) ? prev.filter((id) => id !== frameId) : [...prev, frameId]))
+  }
+
+  const toggleFrameSelectAll = () => {
+    const allIds = frameItems.map((item) => item.id)
+    const allSelected = allIds.length > 0 && frameSelected.length === allIds.length
+    setFrameSelected(allSelected ? [] : allIds)
+  }
+
+  const toggleFrameFavorite = async (frame: FrameItem) => {
+    if (frame.is_favorited) {
+      await api.post(`/api/frames/${frame.id}/unfavorite`)
+    } else {
+      await api.post(`/api/frames/${frame.id}/favorite`, {})
+    }
+    setFrameItems((prev) =>
+      prev.map((item) =>
+        item.id === frame.id ? { ...item, is_favorited: !frame.is_favorited } : item
+      )
+    )
+    if (frameOnlyFavorited && frame.is_favorited && frameJob?.id) {
+      await fetchFrames(frameJob.id, framePage, frameOnlyFavorited)
+    }
+  }
+
+  const openTagModal = (video: Video) => {
+    setTagModal(video)
+    setTagDraft(video.labels || [])
+  }
+
+  const closeTagModal = () => {
+    setTagModal(null)
+    setTagDraft([])
+  }
+
+  const saveVideoTags = async () => {
+    if (!tagModal) return
+    setTagSaving(true)
+    try {
+      const res = await api.post(`/api/videos/${tagModal.bvid}/tags`, { tags: tagDraft })
+      const nextTags = res.data?.tags || tagDraft
+      setVideos((prev) =>
+        prev.map((v) => (v.bvid === tagModal.bvid ? { ...v, labels: nextTags } : v))
+      )
+      closeTagModal()
+    } finally {
+      setTagSaving(false)
+    }
+  }
+
+  const batchFrameFavorite = async (next: boolean) => {
+    if (frameSelected.length === 0) return
+    await api.post('/api/frames/batch/favorite', { frame_ids: frameSelected, is_favorited: next })
+    setFrameSelected([])
+    if (frameJob?.id) {
+      await fetchFrames(frameJob.id, framePage, frameOnlyFavorited)
+    }
+    showToast(next ? '已收藏' : '已取消收藏')
+  }
+
+  const frameStatusLabel = (status?: FrameJobState['status']) => {
+    if (!status) return '未开始'
+    if (status === 'pending') return '排队中'
+    if (status === 'running') return '处理中'
+    if (status === 'success') return '已完成'
+    if (status === 'failed') return '失败'
+    if (status === 'canceled') return '已取消'
+    return status
+  }
+
+  const frameErrorMessage = (code?: string | null) => {
+    if (!code) return '拆解失败，请重试'
+    if (code === 'VIDEO_SOURCE_NOT_AVAILABLE') return '无法获取视频源'
+    if (code === 'NO_FRAMES') return '未抽取到有效帧，可降低阈值或改用定频模式'
+    return code
+  }
+
+  const handleStatusTab = (value: string) => {
+    setStatusTab(value)
+    setPage(1)
+  }
+
+  const openFramePreview = (index: number) => {
+    setFramePreviewIndex(index)
+  }
+
+  const closeFramePreview = () => {
+    setFramePreviewIndex(null)
+  }
+
+  const goPrevFrame = () => {
+    if (framePreviewIndex === null) return
+    setFramePreviewIndex((prev) => (prev === null ? null : Math.max(prev - 1, 0)))
+  }
+
+  const goNextFrame = () => {
+    if (framePreviewIndex === null) return
+    setFramePreviewIndex((prev) => {
+      if (prev === null) return null
+      return Math.min(prev + 1, frameItems.length - 1)
+    })
+  }
+
   return (
     <div className='page'>
       <header className='page-header'>
@@ -429,6 +823,18 @@ export default function VideosPage() {
           }}
         />
       </header>
+
+      <div className='status-tabs'>
+        {statusTabs.map((tab) => (
+          <button
+            key={tab.value}
+            className={`tab-btn ${statusTab === tab.value ? 'active' : ''}`}
+            onClick={() => handleStatusTab(tab.value)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
       <div className='filters'>
         <div className='filters-top'>
@@ -493,6 +899,10 @@ export default function VideosPage() {
               <option value='views:asc'>播放量 低→高</option>
               <option value='views_delta_1d:desc'>单日播放新增 高→低</option>
               <option value='views_delta_1d:asc'>单日播放新增 低→高</option>
+              <option value='favorited_at:desc'>收藏时间 新→旧</option>
+              <option value='favorited_at:asc'>收藏时间 旧→新</option>
+              <option value='status_updated_at:desc'>状态更新时间 新→旧</option>
+              <option value='status_updated_at:asc'>状态更新时间 旧→新</option>
             </select>
           </div>
           <div className='filter-actions'>
@@ -540,17 +950,47 @@ export default function VideosPage() {
             </div>
           </div>
         )}
+        <div className='filters-extra'>
+          <div className='favorite-toggle'>
+            <button
+              className={`btn ghost small ${favoritedOnly ? 'active' : ''}`}
+              onClick={() => setFavoritedOnly((prev) => !prev)}
+            >
+              ⭐ 只看收藏
+            </button>
+          </div>
+        </div>
       </div>
 
       {selected.length > 0 && (
-        <div className='bulk-bar'>
+        <div className='bulk-bar sticky'>
           <div className='select-all'>
             <input type='checkbox' checked={allSelected} onChange={toggleSelectAll} />
             <span>已选 {selected.length} 条</span>
+            <button className='btn ghost small' onClick={() => setSelected([])}>清除选择</button>
           </div>
           <div className='bulk-actions'>
-            <button className='btn ghost' onClick={() => batchUpdateStatus('done')}>批量标记已处理</button>
-            <button className='btn ghost' onClick={() => batchUpdateStatus('todo')}>批量标记待处理</button>
+            <div className='bulk-status'>
+              <select
+                value={bulkStatus}
+                onChange={(e) => setBulkStatus(e.target.value)}
+              >
+                {statusOptions.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <button
+                className='btn ghost'
+                onClick={() => {
+                  if (bulkStatus === 'dropped' && !window.confirm('确定将选中视频标记为淘汰吗？')) return
+                  batchUpdateStatusV2()
+                }}
+              >
+                批量改状态
+              </button>
+            </div>
+            <button className='btn ghost' onClick={() => batchFavorite(true)}>批量收藏</button>
+            <button className='btn ghost' onClick={() => batchFavorite(false)}>批量取消收藏</button>
             <button className='btn ghost' onClick={batchExtractSubtitles}>批量提取字幕</button>
             <button className='btn ghost' onClick={batchDownloadCovers}>批量下载封面</button>
             <ExportPanel
@@ -572,6 +1012,26 @@ export default function VideosPage() {
                 <input type='checkbox' checked={selected.includes(v.bvid)} onChange={() => toggleSelect(v.bvid)} />
               </div>
               <div className='cover'>
+                <button
+                  className={`favorite-btn ${v.is_favorited ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    updateFavorite(v)
+                  }}
+                  title={v.is_favorited ? '取消收藏' : '收藏视频'}
+                >
+                  {v.is_favorited ? '★' : '☆'}
+                </button>
+                <button
+                  className={`cover-favorite-btn ${v.is_cover_favorited ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    updateCoverFavorite(v)
+                  }}
+                  title={v.is_cover_favorited ? '取消封面收藏' : '收藏封面'}
+                >
+                  📌
+                </button>
                 <a
                   className='cover-link'
                   href={getVideoUrl(v)}
@@ -630,7 +1090,16 @@ export default function VideosPage() {
                 <div className='tags-row'>
                   {v.tags.basic_hot.is_hit && <span className='pill hot'>爆款</span>}
                   {v.tags.low_fan_hot.is_hit && <span className='pill low'>低粉爆款</span>}
-                  <span className='pill status'>{v.process_status === 'done' ? '已处理' : '待处理'}</span>
+                  <select
+                    className='status-select'
+                    value={v.process_status}
+                    onChange={(e) => updateProcessStatus(v, e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {statusOptions.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
                   {v.labels && v.labels.length > 0 && (
                     <span className='tag-text'>标签：{v.labels.join(' / ')}</span>
                   )}
@@ -646,6 +1115,8 @@ export default function VideosPage() {
                       字幕
                     </button>
                   </div>
+                  <button className='btn ghost' onClick={() => openTagModal(v)}>编辑标签</button>
+                  <button className='btn ghost' onClick={() => openFrameModal(v)}>帧文件夹</button>
                   <button className='btn ghost' onClick={() => downloadCover(v.bvid)}>封面海报</button>
                 </div>
               </div>
@@ -750,6 +1221,285 @@ export default function VideosPage() {
                 </>
               )
             })()}
+          </div>
+        </div>
+      )}
+      {tagModal && (
+        <div className='tag-modal-mask' onClick={closeTagModal}>
+          <div className='tag-modal' onClick={(e) => e.stopPropagation()}>
+            <header className='tag-modal-header'>
+              <div>
+                <h3>编辑标签</h3>
+                <p>{tagModal.title}</p>
+              </div>
+              <button className='btn ghost' onClick={closeTagModal}>关闭</button>
+            </header>
+            <div className='tag-modal-body'>
+              <TagInput
+                value={tagDraft}
+                suggestions={tagOptions}
+                onChange={setTagDraft}
+                placeholder='输入标签，回车添加'
+              />
+              <p className='tag-modal-tip'>保存后会覆盖当前视频标签。</p>
+            </div>
+            <footer className='tag-modal-footer'>
+              <button className='btn ghost' onClick={closeTagModal}>取消</button>
+              <button className='btn primary' onClick={saveVideoTags} disabled={tagSaving}>
+                {tagSaving ? '保存中...' : '保存'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+      {frameModal && (
+        <div className='frame-modal-mask' onClick={closeFrameModal}>
+          <div className='frame-modal' onClick={(e) => e.stopPropagation()}>
+            <header className='frame-modal-header'>
+              <div>
+                <h3>帧文件夹</h3>
+                <p>{frameVideo?.title || ''}</p>
+              </div>
+              <div className='frame-header-actions'>
+                {frameVideo?.process_status === 'to_shoot' && (
+                  <button
+                    className='btn ghost small'
+                    onClick={() => setShowFrameConfig((prev) => !prev)}
+                  >
+                    {showFrameConfig ? '收起配置' : '重新拆解'}
+                  </button>
+                )}
+                <button className='btn ghost' onClick={closeFrameModal}>关闭</button>
+              </div>
+            </header>
+            <div className='frame-modal-body'>
+              {showFrameConfig && (
+                <div className='frame-config'>
+                  <div className='config-row'>
+                    <label>模式</label>
+                    <div className='config-options'>
+                      <button className={`btn ghost small ${frameMode === 'scene' ? 'active' : ''}`} onClick={() => setFrameMode('scene')}>关键帧</button>
+                      <button className={`btn ghost small ${frameMode === 'interval' ? 'active' : ''}`} onClick={() => setFrameMode('interval')}>定频</button>
+                    </div>
+                  </div>
+                  {frameMode === 'interval' ? (
+                    <div className='config-row'>
+                      <label>间隔</label>
+                      <select value={frameInterval} onChange={(e) => setFrameInterval(Number(e.target.value))}>
+                        {[1, 2, 3, 5, 10].map((n) => (
+                          <option key={n} value={n}>{n} 秒/帧</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className='config-row'>
+                      <label>阈值</label>
+                      <input
+                        type='range'
+                        min={0.25}
+                        max={0.45}
+                        step={0.01}
+                        value={frameThreshold}
+                        onChange={(e) => setFrameThreshold(Number(e.target.value))}
+                      />
+                      <span className='config-value'>{frameThreshold.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className='config-row'>
+                    <label>上限</label>
+                    <input type='number' min={1} max={300} value={frameMax} onChange={(e) => setFrameMax(Number(e.target.value || 120))} />
+                  </div>
+                  <div className='config-row'>
+                    <label>分辨率</label>
+                    <select value={frameResolution} onChange={(e) => setFrameResolution(e.target.value as '720p' | '1080p')}>
+                      <option value='720p'>720p</option>
+                      <option value='1080p'>1080p</option>
+                    </select>
+                  </div>
+                  <button
+                    className='btn primary'
+                    onClick={() => startFrameJob(frameModal)}
+                    disabled={frameSubmitting}
+                  >
+                    {frameSubmitting ? '创建中...' : '开始拆解'}
+                  </button>
+                </div>
+              )}
+              {!frameJob && !showFrameConfig && (
+                <div className='frame-empty'>
+                  暂无拆解结果
+                  {frameVideo?.process_status === 'to_shoot' ? (
+                    <button className='btn ghost small' onClick={() => setShowFrameConfig(true)}>开始拆解</button>
+                  ) : (
+                    <span>（将状态设为待拍摄后可拆解）</span>
+                  )}
+                </div>
+              )}
+              {frameJob && (
+                <div className='frame-progress'>
+                  <div className='progress-row'>
+                    <span>状态：{frameStatusLabel(frameJob.status)}</span>
+                    {(frameJob.generated_frames !== undefined || frameJob.frame_count !== undefined) && (
+                      <span>已生成 {frameJob.generated_frames ?? frameJob.frame_count} 帧</span>
+                    )}
+                  </div>
+                  <div className='progress-bar'>
+                    <div className='progress-fill' style={{ width: `${Math.min((frameJob.progress || 0) * 100, 100)}%` }} />
+                  </div>
+                  <div className='progress-meta'>
+                    <span>{Math.round((frameJob.progress || 0) * 100)}%</span>
+                  </div>
+                  {(frameJob.status === 'running' || frameJob.status === 'pending') && (
+                    <button className='btn ghost' onClick={() => cancelFrameJob(frameJob.id)}>取消任务</button>
+                  )}
+                  {frameJob.status === 'failed' && (
+                    <div className='frame-error'>拆解失败：{frameErrorMessage(frameJob.error_msg)}</div>
+                  )}
+                  {frameJob.status === 'canceled' && (
+                    <div className='frame-error'>任务已取消</div>
+                  )}
+                </div>
+              )}
+              {frameJob?.status === 'success' && (
+                <>
+                  <div className='frame-toolbar'>
+                    <div className='frame-tabs'>
+                      <button
+                        className={`btn ghost small ${!frameOnlyFavorited ? 'active' : ''}`}
+                        onClick={() => {
+                          setFrameOnlyFavorited(false)
+                          setFramePage(1)
+                        }}
+                      >
+                        全部帧
+                      </button>
+                      <button
+                        className={`btn ghost small ${frameOnlyFavorited ? 'active' : ''}`}
+                        onClick={() => {
+                          setFrameOnlyFavorited(true)
+                          setFramePage(1)
+                        }}
+                      >
+                        仅收藏
+                      </button>
+                    </div>
+                    <span className='frame-count'>共 {frameTotal} 帧</span>
+                  </div>
+                  {frameSelected.length > 0 && (
+                    <div className='frame-bulk-bar'>
+                      <div className='frame-bulk-left'>
+                        <input type='checkbox' checked={frameSelected.length === frameItems.length} onChange={toggleFrameSelectAll} />
+                        <span>已选 {frameSelected.length} 帧</span>
+                        <button className='btn ghost small' onClick={() => setFrameSelected([])}>清除选择</button>
+                      </div>
+                      <div className='frame-bulk-actions'>
+                        <button className='btn ghost small' onClick={() => batchFrameFavorite(true)}>批量收藏</button>
+                        <button className='btn ghost small' onClick={() => batchFrameFavorite(false)}>批量取消收藏</button>
+                      </div>
+                    </div>
+                  )}
+                  {frameItems.length === 0 ? (
+                    <div className='frame-empty'>未抽取到有效帧，可降低阈值或改用定频模式</div>
+                  ) : (
+                    <div className='frame-grid'>
+                      {frameItems.map((item, index) => {
+                        const src = item.frame_url.startsWith('http') ? item.frame_url : `${baseUrl}${item.frame_url}`
+                        return (
+                          <div
+                            key={item.id}
+                            className='frame-card'
+                            role='button'
+                            tabIndex={0}
+                            onClick={() => openFramePreview(index)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') openFramePreview(index)
+                            }}
+                          >
+                            <img src={src} alt={`frame-${item.idx}`} loading='lazy' />
+                            {item.timestamp_ms !== null && (
+                              <span className='frame-time'>{formatTimestamp(item.timestamp_ms)}</span>
+                            )}
+                            <button
+                              className={`frame-fav ${item.is_favorited ? 'active' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleFrameFavorite(item)
+                              }}
+                              type='button'
+                            >
+                              {item.is_favorited ? '★' : '☆'}
+                            </button>
+                            <label
+                              className='frame-check'
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type='checkbox'
+                                checked={frameSelected.includes(item.id)}
+                                onChange={() => toggleFrameSelect(item.id)}
+                              />
+                            </label>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {frameTotal > framePageSize && (
+                    <div className='frame-pagination'>
+                      <button
+                        className='btn ghost small'
+                        disabled={framePage <= 1}
+                        onClick={() => setFramePage((prev) => Math.max(prev - 1, 1))}
+                      >
+                        上一页
+                      </button>
+                      <span>{framePage} / {Math.ceil(frameTotal / framePageSize)}</span>
+                      <button
+                        className='btn ghost small'
+                        disabled={framePage >= Math.ceil(frameTotal / framePageSize)}
+                        onClick={() => setFramePage((prev) => Math.min(prev + 1, Math.ceil(frameTotal / framePageSize)))}
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {framePreviewIndex !== null && frameItems[framePreviewIndex] && (
+          <div className='frame-lightbox' onClick={closeFramePreview}>
+          <div className='frame-lightbox-body' onClick={(e) => e.stopPropagation()}>
+            <button className='lightbox-close' onClick={closeFramePreview}>关闭</button>
+            <button className='lightbox-nav prev' onClick={goPrevFrame} disabled={framePreviewIndex === 0}>‹</button>
+            <img
+              src={
+                frameItems[framePreviewIndex].frame_url.startsWith('http')
+                  ? frameItems[framePreviewIndex].frame_url
+                  : `${baseUrl}${frameItems[framePreviewIndex].frame_url}`
+              }
+              alt='frame-preview'
+            />
+            <button
+              className={`lightbox-fav ${frameItems[framePreviewIndex].is_favorited ? 'active' : ''}`}
+              onClick={() => toggleFrameFavorite(frameItems[framePreviewIndex])}
+            >
+              {frameItems[framePreviewIndex].is_favorited ? '已收藏' : '收藏'}
+            </button>
+            <button
+              className='lightbox-nav next'
+              onClick={goNextFrame}
+              disabled={framePreviewIndex >= frameItems.length - 1}
+            >
+              ›
+            </button>
+            <div className='lightbox-meta'>
+              {frameItems[framePreviewIndex].timestamp_ms !== null
+                ? formatTimestamp(frameItems[framePreviewIndex].timestamp_ms)
+                : '--'}
+            </div>
           </div>
         </div>
       )}

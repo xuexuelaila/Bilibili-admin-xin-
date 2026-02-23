@@ -11,6 +11,7 @@ from app.schemas.pagination import Page
 from app.services.defaults import default_rules, default_scope, default_schedule
 from app.services.task_runner import TaskRunner
 from app.workers.tasks import run_task as celery_run_task
+from app.workers.tasks import refresh_all_videos as celery_refresh_all_videos
 
 router = APIRouter()
 
@@ -214,6 +215,12 @@ def run_task(task_id: str, db: Session = Depends(get_db), async_run: bool = Fals
     runner = TaskRunner(db)
     run = runner.run(task, trigger="manual")
     return {"run_id": run.id, "async": False}
+
+
+@router.post("/refresh_all")
+def refresh_all_videos():
+    job = celery_refresh_all_videos.delay()
+    return {"job_id": job.id, "async": True}
 
 
 @router.post("/{task_id}/dry-run")
