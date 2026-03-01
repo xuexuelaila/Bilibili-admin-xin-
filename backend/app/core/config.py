@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     refresh_all_enabled: bool = True
     refresh_all_time: str = "03:00"
     refresh_all_batch_size: int = 50
+    comment_crawl_limit: int = 500
+    comment_crawl_limit_max: int = 1000
+    comment_crawl_min_views: int = 0
+    comment_crawl_hot_only: bool = False
+    product_domain_whitelist: str = (
+        "jd.com,item.jd.com,m.jd.com,3.cn,jd.cn,ulink.jd.com,taobao.com,item.taobao.com,h5.m.taobao.com,"
+        "tmall.com,item.tmall.com,detail.tmall.com,detail.m.tmall.com,pinduoduo.com,mobile.yangkeduo.com,"
+        "vip.com,m.vip.com,detail.vip.com,suning.com,product.suning.com,m.suning.com"
+    )
+    product_short_link_domains: str = "b23.tv,m.tb.cn,s.tb.cn,u.jd.com,union-click.jd.com"
     asr_provider: str = ""
     asr_model: str = "base"
     asr_language: str = "zh"
@@ -59,6 +69,24 @@ class Settings(BaseSettings):
         if raw.startswith("[") and raw.endswith("]"):
             raw = raw.strip("[]")
         return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @property
+    def product_domain_list(self) -> list[str]:
+        raw = (self.product_domain_whitelist or "").strip()
+        if not raw:
+            return []
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw.strip("[]")
+        return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+    @property
+    def product_short_link_list(self) -> list[str]:
+        raw = (self.product_short_link_domains or "").strip()
+        if not raw:
+            return []
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw.strip("[]")
+        return [item.strip().lower() for item in raw.split(",") if item.strip()]
 
 
 @lru_cache

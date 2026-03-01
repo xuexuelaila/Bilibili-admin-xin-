@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+from app.services.bili_wbi import get_mixin_key, get_wbi_keys, sign_params
 
 from app.core.config import settings
 from app.services.bili_client import BiliClient
@@ -35,6 +36,8 @@ class CrawlerBiliClient(BiliClient):
         }
         self.cookies = _parse_cookie_string(cookies or settings.bili_cookies)
         self.client = httpx.Client(headers=headers, cookies=self.cookies, timeout=self.timeout_seconds)
+        self._wbi_mixin_key: str | None = None
+        self._wbi_key_time: float | None = None
 
     def search_videos(
         self,
@@ -77,6 +80,7 @@ class CrawlerBiliClient(BiliClient):
             owner = payload.get("owner", {}) if isinstance(payload.get("owner"), dict) else {}
             return {
                 "bvid": payload.get("bvid") or bvid,
+                "aid": payload.get("aid"),
                 "title": _strip_html(payload.get("title") or ""),
                 "up_id": str(owner.get("mid") or ""),
                 "up_name": owner.get("name") or "",
@@ -111,6 +115,7 @@ class CrawlerBiliClient(BiliClient):
 
         return {
             "bvid": video_data.get("bvid") or bvid,
+            "aid": video_data.get("aid"),
             "title": _strip_html(video_data.get("title") or ""),
             "up_id": str(owner.get("mid") or ""),
             "up_name": owner.get("name") or "",
@@ -230,6 +235,50 @@ class CrawlerBiliClient(BiliClient):
                 return first.get("url")
         return None
 
+    def get_video_comments(self, bvid: str, limit: int = 500) -> list[dict]:
+        detail = self.get_video_detail(bvid)
+        aid = detail.get("aid")
+        if not aid:
+            return []
+
+        url = "https://api.bilibili.com/x/v2/reply/main"
+        wbi_url = "https://api.bilibili.com/x/v2/reply/wbi/main"
+        page_size = 20
+        max_limit = max(1, min(int(limit), 1000))
+        page = 1
+        raw_replies: list[dict] = []
+
+        while len(raw_replies) < max_limit:
+            params = {"type": 1, "oid": aid, "pn": page, "ps": page_size, "sort": 2}
+            data = self._request_json(url, params)
+            if not data or data.get("code") != 0:
+                data = self._request_json_wbi(wbi_url, params)
+            if not data or data.get("code") != 0:
+                break
+            payload = data.get("data") if isinstance(data.get("data"), dict) else {}
+
+            if page == 1:
+                top = payload.get("top") if isinstance(payload.get("top"), dict) else {}
+                top_upper = top.get("upper")
+                if isinstance(top_upper, dict):
+                    raw_replies.append(top_upper)
+                top_replies = top.get("replies")
+                if isinstance(top_replies, list):
+                    raw_replies.extend([r for r in top_replies if isinstance(r, dict)])
+
+            replies = payload.get("replies")
+            if not isinstance(replies, list) or not replies:
+                break
+            raw_replies.extend([r for r in replies if isinstance(r, dict)])
+            if len(replies) < page_size:
+                break
+            page += 1
+
+        normalized: list[dict] = []
+        for reply in raw_replies[:max_limit]:
+            _collect_comment(reply, normalized)
+        return normalized
+
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         for attempt in range(self.retry_times + 1):
             try:
@@ -257,6 +306,36 @@ class CrawlerBiliClient(BiliClient):
                     return None
                 time.sleep(0.5 * (attempt + 1))
         return None
+
+    def _request_json_wbi(self, url: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        mixin_key = self._ensure_wbi_key()
+        if not mixin_key:
+            return None
+        signed = sign_params({k: str(v) for k, v in params.items()}, mixin_key)
+        for attempt in range(self.retry_times + 1):
+            try:
+                self._rate_limit()
+                res = self.client.get(url, params=signed)
+                if res.status_code != 200:
+                    continue
+                return res.json()
+            except Exception:
+                if attempt >= self.retry_times:
+                    return None
+                time.sleep(0.5 * (attempt + 1))
+        return None
+
+    def _ensure_wbi_key(self) -> str | None:
+        now = time.time()
+        if self._wbi_mixin_key and self._wbi_key_time and now - self._wbi_key_time < 3600:
+            return self._wbi_mixin_key
+        keys = get_wbi_keys(self.client)
+        if not keys:
+            return None
+        img_key, sub_key = keys
+        self._wbi_mixin_key = get_mixin_key(img_key, sub_key)
+        self._wbi_key_time = now
+        return self._wbi_mixin_key
 
     def _rate_limit(self) -> None:
         now = time.time()
@@ -364,6 +443,32 @@ class CrawlerBiliClient(BiliClient):
                 }
             )
         return results
+
+
+def _collect_comment(reply: dict[str, Any], out: list[dict[str, Any]]) -> None:
+    if not isinstance(reply, dict):
+        return
+    content = reply.get("content") if isinstance(reply.get("content"), dict) else {}
+    member = reply.get("member") if isinstance(reply.get("member"), dict) else {}
+    user_id = str(member.get("mid") or reply.get("mid") or "")
+    message = content.get("message") or ""
+    jump_url = content.get("jump_url") if isinstance(content.get("jump_url"), dict) else {}
+    ctime = reply.get("ctime")
+    if user_id and (message or jump_url):
+        out.append(
+            {
+                "user_id": user_id,
+                "message": message,
+                "jump_url": jump_url,
+                "ctime": ctime,
+                "raw": reply,
+            }
+        )
+    replies = reply.get("replies")
+    if isinstance(replies, list):
+        for child in replies:
+            if isinstance(child, dict):
+                _collect_comment(child, out)
 
 
 def _parse_cookie_string(cookie_str: str | None) -> dict[str, str]:

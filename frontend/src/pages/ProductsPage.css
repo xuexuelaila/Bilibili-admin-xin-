@@ -1,0 +1,50 @@
+.product-filters { display: grid; grid-template-columns: 2fr 1fr 1fr 1.6fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 16px; align-items: end; }
+.product-filters .filter-block { display: grid; gap: 8px; }
+.product-filters label { font-size: 12px; color: var(--muted); }
+.product-filters input,
+.product-filters select { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; color: var(--text); font-size: 13px; height: 36px; }
+
+.mode-switch { display: flex; gap: 8px; flex-wrap: wrap; }
+.mode-switch .btn.small { padding: 6px 10px; font-size: 12px; }
+.mode-switch .btn.small.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+.product-table { display: grid; gap: 8px; }
+.product-table-head,
+.product-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 0.8fr; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; }
+.product-table-head { background: var(--bg-soft); border: 1px solid var(--border); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.product-row { background: var(--panel); border: 1px solid var(--border); }
+
+.product-meta { display: grid; gap: 6px; }
+.product-id { font-weight: 700; font-size: 14px; color: var(--text); }
+.product-sku { font-size: 12px; color: var(--muted); }
+.product-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.product-tags .pill { font-size: 11px; }
+.product-platform { font-weight: 600; text-transform: uppercase; color: var(--text); }
+.metric { font-weight: 700; font-size: 14px; color: var(--text); }
+.muted { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 1400px) {
+  .product-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .product-table-head,
+  .product-row { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
+  .product-table-head span:last-child,
+  .product-row span:last-child { display: none; }
+}
+
+@media (max-width: 1000px) {
+  .product-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-table-head,
+  .product-row { grid-template-columns: 1.6fr 1fr 1fr; }
+  .product-table-head span:nth-child(4),
+  .product-table-head span:nth-child(5),
+  .product-row span:nth-child(4),
+  .product-row span:nth-child(5) { display: none; }
+}
+
+@media (max-width: 720px) {
+  .product-filters { grid-template-columns: 1fr; }
+  .product-table-head,
+  .product-row { grid-template-columns: 1fr 1fr; }
+  .product-table-head span:nth-child(3),
+  .product-row span:nth-child(3) { display: none; }
+}

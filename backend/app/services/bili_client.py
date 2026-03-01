@@ -31,6 +31,9 @@ class BiliClient:
     def get_video_url(self, bvid: str) -> str | None:
         raise NotImplementedError
 
+    def get_video_comments(self, bvid: str, limit: int = 500) -> list[dict]:
+        raise NotImplementedError
+
 
 class MockBiliClient(BiliClient):
     def search_videos(self, keyword: str, days_limit: int, fetch_limit: int, search_sort: str, partitions=None):
@@ -53,3 +56,6 @@ class MockBiliClient(BiliClient):
 
     def get_video_url(self, bvid: str) -> str | None:
         return None
+
+    def get_video_comments(self, bvid: str, limit: int = 500) -> list[dict]:
+        return []

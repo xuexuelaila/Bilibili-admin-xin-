@@ -61,12 +61,16 @@
 .stat-item { display: grid; gap: 4px; }
 .stat-item span { color: var(--muted); font-size: 11px; }
 .stat-item strong { font-size: 16px; }
-.tags-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.tag-text { color: var(--muted); font-size: 11px; }
+.tags-row { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; min-width: 0; }
+.tags-row > * { flex: 0 0 auto; }
+.tag-text { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 .pill.hot { background: #fff3d6; color: #7a4b00; }
 .pill.low { background: #e8f5ff; color: #245c86; }
 .status-select { background: #eef1f4; color: #3b4752; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
-.video-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: relative; }
+.video-actions { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; position: relative; overflow-x: auto; padding-bottom: 2px; }
+.video-actions::-webkit-scrollbar { height: 6px; }
+.video-actions::-webkit-scrollbar-thumb { background: #d3d9df; border-radius: 999px; }
+.video-actions::-webkit-scrollbar-track { background: transparent; }
 .subtitle-actions { position: relative; }
 
 .subtitle-modal-mask { position: fixed; inset: 0; background: rgba(17, 20, 26, 0.45); display: grid; place-items: center; z-index: 200; padding: 20px; }

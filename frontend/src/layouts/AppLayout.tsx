@@ -17,6 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <nav className='app-nav'>
           <NavLink to='/tasks'>任务管理</NavLink>
           <NavLink to='/videos'>视频库</NavLink>
+          <NavLink to='/products'>选品库</NavLink>
           <NavLink to='/covers'>封面库</NavLink>
           <NavLink to='/settings'>系统中心 {unread > 0 ? <span className='badge'>{unread}</span> : null}</NavLink>
         </nav>

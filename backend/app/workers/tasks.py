@@ -14,12 +14,29 @@ from pathlib import Path
 
 import httpx
 
-from app.models import Task, Subtitle, Video, FrameJob, VideoFrame
+from app.models import (
+    Task,
+    Subtitle,
+    Video,
+    FrameJob,
+    VideoFrame,
+    CommentCrawlJob,
+    Product,
+    ProductMention,
+)
 from app.services.bili_client import MockBiliClient
 from app.services.bili_crawler import CrawlerBiliClient
 from app.services.asr_service import transcribe_audio_url
 from app.services.settings_service import get_or_create_settings
 from app.services.task_runner import TaskRunner
+from app.services.product_links import (
+    build_product_key,
+    expand_url,
+    extract_urls,
+    parse_product,
+    product_domain_whitelist,
+    short_link_domains,
+)
 from app.workers.celery_app import celery_app
 
 
@@ -161,6 +178,13 @@ def _build_subtitle_client(db):
     return MockBiliClient()
 
 
+def _comment_crawl_limit() -> int:
+    limit = int(settings.comment_crawl_limit or 500)
+    max_limit = int(settings.comment_crawl_limit_max or 1000)
+    limit = max(1, min(limit, max_limit))
+    return limit
+
+
 def _mark_subtitle(db, bvid: str, status: str, text: str | None = None, error: str | None = None) -> Subtitle:
     subtitle = db.get(Subtitle, bvid)
     if not subtitle:
@@ -210,6 +234,155 @@ def extract_subtitle(bvid: str):
 
         _mark_subtitle(db, bvid, "failed", text=None, error="asr failed")
         return {"status": "failed", "error": "asr failed"}
+    finally:
+        db.close()
+
+
+def _to_datetime(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.utcfromtimestamp(value)
+    return None
+
+
+@celery_app.task(name="crawl_comments")
+def crawl_comments(job_id: str):
+    db = SessionLocal()
+    now = datetime.utcnow()
+    try:
+        job = db.get(CommentCrawlJob, job_id)
+        if not job:
+            return {"error": "job not found"}
+        if job.status == "running":
+            return {"status": "running"}
+
+        job.status = "running"
+        job.error_msg = None
+        job.updated_at = now
+        db.add(job)
+        db.commit()
+
+        client = _build_subtitle_client(db)
+        limit = int(job.limit or _comment_crawl_limit())
+        limit = max(1, min(limit, int(settings.comment_crawl_limit_max or 1000)))
+        comments = client.get_video_comments(job.bvid, limit=limit) if client else []
+
+        whitelist = product_domain_whitelist()
+        short_domains = short_link_domains()
+        url_cache: dict[str, str] = {}
+        product_cache: dict[str, Product] = {}
+        seen_mentions: set[tuple] = set()
+        mention_count = 0
+        product_ids: set[int] = set()
+
+        with httpx.Client(headers=_bili_headers(), follow_redirects=True, timeout=10.0) as http_client:
+            for comment in comments:
+                user_id = str(comment.get("user_id") or "").strip()
+                if not user_id:
+                    continue
+                mentioned_at = _to_datetime(comment.get("ctime")) or now
+                urls = extract_urls(
+                    comment.get("message") or "",
+                    comment.get("jump_url") or {},
+                    comment.get("raw"),
+                )
+                if not urls:
+                    continue
+
+                for raw_url in urls:
+                    expanded = url_cache.get(raw_url)
+                    if not expanded:
+                        expanded = expand_url(raw_url, http_client, short_domains) if short_domains else raw_url
+                        url_cache[raw_url] = expanded
+
+                    info = parse_product(expanded, whitelist)
+                    if not info:
+                        continue
+
+                    key = build_product_key(info["platform"], info["item_id"], info.get("sku_id"))
+                    product = product_cache.get(key)
+                    if not product:
+                        product = (
+                            db.execute(select(Product).where(Product.product_key == key))
+                            .scalars()
+                            .first()
+                        )
+                        if not product:
+                            product = Product(
+                                product_key=key,
+                                platform=info["platform"],
+                                item_id=info["item_id"],
+                                sku_id=info.get("sku_id"),
+                                first_seen_at=mentioned_at,
+                                last_seen_at=mentioned_at,
+                            )
+                            db.add(product)
+                            db.flush()
+                        else:
+                            if not product.last_seen_at or product.last_seen_at < mentioned_at:
+                                product.last_seen_at = mentioned_at
+                            db.add(product)
+                        product_cache[key] = product
+
+                    product_ids.add(product.id)
+
+                    keywords = job.keywords or []
+                    keyword_list = keywords if keywords else [None]
+                    for keyword in keyword_list:
+                        mention_key = (product.id, job.bvid, user_id, raw_url, keyword or "")
+                        if mention_key in seen_mentions:
+                            continue
+                        seen_mentions.add(mention_key)
+
+                        exists = (
+                            db.execute(
+                                select(ProductMention.id).where(
+                                    ProductMention.product_id == product.id,
+                                    ProductMention.bvid == job.bvid,
+                                    ProductMention.user_id == user_id,
+                                    ProductMention.raw_url == raw_url,
+                                    ProductMention.keyword == keyword,
+                                )
+                            )
+                            .first()
+                        )
+                        if exists:
+                            continue
+
+                        mention = ProductMention(
+                            product_id=product.id,
+                            bvid=job.bvid,
+                            task_id=job.task_id,
+                            keyword=keyword,
+                            user_id=user_id,
+                            mentioned_at=mentioned_at,
+                            raw_url=raw_url,
+                            job_id=job.id,
+                        )
+                        db.add(mention)
+                        mention_count += 1
+
+        job.comment_count = len(comments)
+        job.mention_count = mention_count
+        job.product_count = len(product_ids)
+        job.status = "success"
+        job.finished_at = datetime.utcnow()
+        job.updated_at = datetime.utcnow()
+        db.add(job)
+        db.commit()
+        return {"status": "success", "comments": len(comments), "mentions": mention_count}
+    except Exception as exc:  # noqa: BLE001
+        job = db.get(CommentCrawlJob, job_id) if db else None
+        if job:
+            job.status = "failed"
+            job.error_msg = str(exc)
+            job.updated_at = datetime.utcnow()
+            db.add(job)
+            db.commit()
+        return {"status": "failed", "error": str(exc)}
     finally:
         db.close()
 

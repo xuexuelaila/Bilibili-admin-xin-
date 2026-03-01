@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Task, Run, Video, TaskVideo, Subtitle, Alert
+from app.models import Task, Run, Video, TaskVideo, Subtitle, Alert, CommentCrawlJob
 from app.services.bili_client import MockBiliClient, BiliClient
 from app.services.bili_crawler import CrawlerBiliClient
 from app.core.config import settings
@@ -58,6 +58,7 @@ class TaskRunner:
             error_samples.append(payload)
 
         candidates: list[dict[str, Any]] = []
+        keyword_map: dict[str, set[str]] = {}
         try:
             scope = task.scope or {}
             for keyword in task.keywords:
@@ -69,6 +70,10 @@ class TaskRunner:
                         search_sort=scope.get("search_sort", "relevance"),
                         partitions=scope.get("partition_ids") or [],
                     )
+                    for item in items or []:
+                        bvid = item.get("bvid")
+                        if bvid:
+                            keyword_map.setdefault(bvid, set()).add(keyword)
                     candidates.extend(items or [])
                 except Exception as exc:  # noqa: BLE001
                     counts["failed_items"] += 1
@@ -96,7 +101,8 @@ class TaskRunner:
 
             for bvid, item in dedup_map.items():
                 try:
-                    self._upsert_video(task, bvid, item, counts)
+                    keywords = sorted(keyword_map.get(bvid, set()))
+                    self._upsert_video(task, bvid, item, counts, keywords=keywords)
                 except Exception as exc:  # noqa: BLE001
                     counts["failed_items"] += 1
                     record_error("upsert", str(exc), {"bvid": bvid})
@@ -241,7 +247,14 @@ class TaskRunner:
 
         return {"counts": counts, "samples": samples, "errors": error_samples}
 
-    def _upsert_video(self, task: Task, bvid: str, item: dict[str, Any], counts: dict[str, int]) -> None:
+    def _upsert_video(
+        self,
+        task: Task,
+        bvid: str,
+        item: dict[str, Any],
+        counts: dict[str, int],
+        keywords: list[str] | None = None,
+    ) -> None:
         computed = self._compute_item(task, bvid, item)
         stats = computed["stats"]
         up_id = computed["up_id"]
@@ -321,9 +334,11 @@ class TaskRunner:
             .scalars()
             .first()
         )
+        new_link = False
         if not link:
             link = TaskVideo(task_id=task.id, bvid=bvid)
             self.db.add(link)
+            new_link = True
             if is_new:
                 counts["inserted"] += 1
 
@@ -331,7 +346,35 @@ class TaskRunner:
             subtitle = Subtitle(bvid=bvid, status="none")
             self.db.add(subtitle)
 
+        job = None
+        if new_link and self._should_crawl_comments(video):
+            existing_job = (
+                self.db.execute(
+                    select(CommentCrawlJob).where(
+                        CommentCrawlJob.task_id == task.id,
+                        CommentCrawlJob.bvid == bvid,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if not existing_job:
+                job = CommentCrawlJob(
+                    task_id=task.id,
+                    bvid=bvid,
+                    keywords=keywords or [],
+                    limit=self._comment_crawl_limit(),
+                )
+                self.db.add(job)
+
         self.db.commit()
+        if job:
+            try:
+                from app.workers.celery_app import celery_app
+
+                celery_app.send_task("crawl_comments", args=[job.id])
+            except Exception:
+                pass
 
     def _compute_item(self, task: Task, bvid: str, item: dict[str, Any]) -> dict[str, Any]:
         detail = self.client.get_video_detail(bvid) or {}
@@ -369,6 +412,22 @@ class TaskRunner:
             "stats": stats,
             "tags": tags,
         }
+
+    @staticmethod
+    def _comment_crawl_limit() -> int:
+        limit = int(settings.comment_crawl_limit or 500)
+        max_limit = int(settings.comment_crawl_limit_max or 1000)
+        return max(1, min(limit, max_limit))
+
+    @staticmethod
+    def _should_crawl_comments(video: Video) -> bool:
+        if settings.comment_crawl_hot_only:
+            if not (video.basic_hot or video.low_fan_hot):
+                return False
+        threshold = int(settings.comment_crawl_min_views or 0)
+        if threshold > 0 and int(video.views or 0) < threshold:
+            return False
+        return True
 
     @staticmethod
     def _coerce_datetime(value: Any) -> datetime | None:

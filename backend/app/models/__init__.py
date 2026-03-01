@@ -10,6 +10,9 @@ from app.models.cover_favorite import CoverFavorite
 from app.models.frame_job import FrameJob
 from app.models.frame_favorite import FrameFavorite
 from app.models.video_frame import VideoFrame
+from app.models.comment_crawl_job import CommentCrawlJob
+from app.models.product import Product
+from app.models.product_mention import ProductMention
 
 __all__ = [
     "Task",
@@ -24,4 +27,7 @@ __all__ = [
     "FrameJob",
     "FrameFavorite",
     "VideoFrame",
+    "CommentCrawlJob",
+    "Product",
+    "ProductMention",
 ]
