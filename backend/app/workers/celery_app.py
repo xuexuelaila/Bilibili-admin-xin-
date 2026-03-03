@@ -40,6 +40,13 @@ if settings.refresh_all_enabled:
         "schedule": crontab(hour=hour, minute=minute),
     }
 
+creator_interval = int(settings.creator_watch_interval_minutes or 45)
+creator_interval = max(30, min(60, creator_interval))
+beat_schedule["sync-creator-watch"] = {
+    "task": "sync_creator_watch",
+    "schedule": float(creator_interval * 60),
+}
+
 celery_app.conf.update(
     task_track_started=True,
     timezone="UTC",

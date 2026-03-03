@@ -43,6 +43,7 @@ class Video(Base):
     status_updated_at = Column(DateTime, nullable=True)
     is_favorited = Column(Boolean, nullable=False, default=False)
     favorited_at = Column(DateTime, nullable=True)
+    source = Column(String(32), nullable=False, default="task")
     source_video_path = Column(String(500), nullable=True)
     note = Column(Text, nullable=True)
 

@@ -22,6 +22,12 @@ class BiliClient:
     def get_up_info(self, up_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_up_profile(self, up_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_up_stats(self, up_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
     def get_subtitle(self, bvid: str) -> str | None:
         raise NotImplementedError
 
@@ -32,6 +38,9 @@ class BiliClient:
         raise NotImplementedError
 
     def get_video_comments(self, bvid: str, limit: int = 500) -> list[dict]:
+        raise NotImplementedError
+
+    def get_creator_videos(self, up_id: str, limit: int = 20) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -48,6 +57,12 @@ class MockBiliClient(BiliClient):
     def get_up_info(self, up_id: str) -> dict[str, Any]:
         return {"up_name": "", "follower_count": 0}
 
+    def get_up_profile(self, up_id: str) -> dict[str, Any]:
+        return {"up_name": "", "avatar": None}
+
+    def get_up_stats(self, up_id: str) -> dict[str, Any]:
+        return {"view_count": 0, "like_count": 0}
+
     def get_subtitle(self, bvid: str) -> str | None:
         return None
 
@@ -58,4 +73,7 @@ class MockBiliClient(BiliClient):
         return None
 
     def get_video_comments(self, bvid: str, limit: int = 500) -> list[dict]:
+        return []
+
+    def get_creator_videos(self, up_id: str, limit: int = 20) -> list[dict[str, Any]]:
         return []

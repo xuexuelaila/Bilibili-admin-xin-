@@ -37,6 +37,7 @@ def _ensure_sqlite_columns() -> None:
                 "status_updated_at": "DATETIME",
                 "is_favorited": "BOOLEAN DEFAULT 0",
                 "favorited_at": "DATETIME",
+                "source": "TEXT DEFAULT 'task'",
                 "source_video_path": "TEXT",
             },
             "frame_jobs": {
@@ -44,6 +45,12 @@ def _ensure_sqlite_columns() -> None:
             },
             "video_frames": {
                 "thumb_url": "TEXT",
+            },
+            "followed_creators": {
+                "follower_count": "INTEGER DEFAULT 0",
+                "following_count": "INTEGER DEFAULT 0",
+                "like_count": "INTEGER DEFAULT 0",
+                "view_count": "INTEGER DEFAULT 0",
             },
         }
         for table, columns in tables.items():
@@ -60,6 +67,9 @@ def _ensure_sqlite_columns() -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"))
             if "tags" in columns and "tags" in existing:
                 conn.execute(text(f"UPDATE {table} SET tags='[]' WHERE tags IS NULL"))
+            if table == "videos":
+                if "source" in existing:
+                    conn.execute(text("UPDATE videos SET source='task' WHERE source IS NULL"))
 
 
 def get_db():

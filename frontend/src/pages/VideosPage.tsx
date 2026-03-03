@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { DayPicker, DateRange } from 'react-day-picker'
-import 'react-day-picker/dist/style.css'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import ExportPanel from '../components/ExportPanel'
 import '../components/ExportPanel.css'
@@ -10,6 +9,8 @@ import '../components/Pagination.css'
 import Empty from '../components/Empty'
 import TagInput from '../components/TagInput'
 import './VideosPage.css'
+
+type DateRangeValue = { from?: Date; to?: Date }
 
 interface Video {
   bvid: string
@@ -74,8 +75,9 @@ export default function VideosPage() {
   const [publishTo, setPublishTo] = useState('')
   const [quickDays, setQuickDays] = useState<number | null>(null)
   const [customDate, setCustomDate] = useState(false)
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
-  const [minViews, setMinViews] = useState('')
+  const [bvidKeyword, setBvidKeyword] = useState('')
+  const [titleKeyword, setTitleKeyword] = useState('')
+  const [minFans, setMinFans] = useState('')
   const [sortKey, setSortKey] = useState('publish_time')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [favoritedOnly, setFavoritedOnly] = useState(false)
@@ -119,7 +121,9 @@ export default function VideosPage() {
     if (labels.length > 0) params.set('tags', labels.join(','))
     if (publishFrom) params.set('publish_from', publishFrom)
     if (publishTo) params.set('publish_to', publishTo)
-    if (minViews) params.set('min_views', minViews)
+    if (bvidKeyword.trim()) params.set('bvid', bvidKeyword.trim())
+    if (titleKeyword.trim()) params.set('title', titleKeyword.trim())
+    if (minFans) params.set('min_fans', minFans)
     if (favoritedOnly) params.set('is_favorited', 'true')
     if (statusTab && statusTab !== 'all') params.set('status', statusTab)
     if (sortKey) params.set('sort', sortKey)
@@ -134,7 +138,7 @@ export default function VideosPage() {
 
   useEffect(() => {
     load()
-  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
+  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
@@ -142,11 +146,11 @@ export default function VideosPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder])
+  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder])
 
   useEffect(() => {
     setSelected([])
-  }, [labels, publishFrom, publishTo, minViews, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
+  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     setCoverError({})
@@ -522,13 +526,9 @@ export default function VideosPage() {
     setCustomDate(false)
     setPublishFrom(from)
     setPublishTo(to)
-    setDateRange({
-      from: dayjs(from).toDate(),
-      to: dayjs(to).toDate(),
-    })
   }
 
-  const canClear = labels.length > 0 || !!publishFrom || !!publishTo || quickDays !== null || customDate || !!minViews || favoritedOnly || statusTab !== 'todo' || sortKey !== 'publish_time' || sortOrder !== 'desc'
+  const canClear = labels.length > 0 || !!publishFrom || !!publishTo || quickDays !== null || customDate || !!bvidKeyword || !!titleKeyword || !!minFans || favoritedOnly || statusTab !== 'todo' || sortKey !== 'publish_time' || sortOrder !== 'desc'
 
   const getVideoUrl = (video: Video) => {
     if (video.video_url) return video.video_url
@@ -547,8 +547,9 @@ export default function VideosPage() {
     setPublishTo('')
     setQuickDays(null)
     setCustomDate(false)
-    setDateRange(undefined)
-    setMinViews('')
+    setBvidKeyword('')
+    setTitleKeyword('')
+    setMinFans('')
     setFavoritedOnly(false)
     setStatusTab('todo')
     setSortKey('publish_time')
@@ -577,8 +578,7 @@ export default function VideosPage() {
     { value: 'all', label: '全部' },
   ]
 
-  const applyRange = (range?: DateRange) => {
-    setDateRange(range)
+  const applyRange = (range?: DateRangeValue) => {
     if (!range?.from && !range?.to) {
       setPublishFrom('')
       setPublishTo('')
@@ -589,64 +589,6 @@ export default function VideosPage() {
     setPublishFrom(from)
     setPublishTo(to)
   }
-
-  const presets = useMemo(
-    () => [
-      {
-        label: '今天',
-        range: () => {
-          const today = dayjs()
-          return { from: today.startOf('day').toDate(), to: today.startOf('day').toDate() }
-        },
-      },
-      {
-        label: '昨天',
-        range: () => {
-          const day = dayjs().subtract(1, 'day')
-          return { from: day.startOf('day').toDate(), to: day.startOf('day').toDate() }
-        },
-      },
-      {
-        label: '最近7天',
-        range: () => {
-          const to = dayjs().startOf('day')
-          const from = to.subtract(6, 'day')
-          return { from: from.toDate(), to: to.toDate() }
-        },
-      },
-      {
-        label: '这个月',
-        range: () => {
-          const now = dayjs()
-          return { from: now.startOf('month').toDate(), to: now.startOf('day').toDate() }
-        },
-      },
-      {
-        label: '上个月',
-        range: () => {
-          const last = dayjs().subtract(1, 'month')
-          return { from: last.startOf('month').toDate(), to: last.endOf('month').toDate() }
-        },
-      },
-      {
-        label: '上个季度',
-        range: () => {
-          const now = dayjs()
-          const currentQuarter = Math.floor(now.month() / 3) + 1
-          let year = now.year()
-          let startMonth = (currentQuarter - 2) * 3
-          if (startMonth < 0) {
-            startMonth = 9
-            year -= 1
-          }
-          const start = dayjs().year(year).month(startMonth).startOf('month')
-          const end = start.add(2, 'month').endOf('month')
-          return { from: start.toDate(), to: end.toDate() }
-        },
-      },
-    ],
-    []
-  )
 
   const openSubtitleModal = async (bvid: string) => {
     const next = subtitleModal === bvid ? null : bvid
@@ -813,32 +755,34 @@ export default function VideosPage() {
           <h1>视频库</h1>
           <p>按标签与发布时间快速筛选。</p>
         </div>
-        <ExportPanel
-          baseUrl={baseUrl}
-          label='导出筛选'
-          filters={{
-            tags: labels.join(','),
-            publish_from: publishFrom,
-            publish_to: publishTo,
-          }}
-        />
       </header>
 
-      <div className='status-tabs'>
-        {statusTabs.map((tab) => (
+      <div className='status-row'>
+        <div className='status-tabs'>
+          {statusTabs.map((tab) => (
+            <button
+              key={tab.value}
+              className={`tab-btn ${statusTab === tab.value ? 'active' : ''}`}
+              onClick={() => handleStatusTab(tab.value)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className='status-actions'>
           <button
-            key={tab.value}
-            className={`tab-btn ${statusTab === tab.value ? 'active' : ''}`}
-            onClick={() => handleStatusTab(tab.value)}
+            className={`btn ghost small ${favoritedOnly ? 'active' : ''}`}
+            onClick={() => setFavoritedOnly((prev) => !prev)}
           >
-            {tab.label}
+            ⭐ 只看收藏
           </button>
-        ))}
+          <button className='btn ghost small weak' onClick={clearAll} disabled={!canClear}>清空全部</button>
+        </div>
       </div>
 
       <div className='filters'>
-        <div className='filters-top'>
-          <div className='filter-block tags-block'>
+        <div className='filters-grid'>
+          <div className='filter-block span-5'>
             <label>标签/关键词</label>
             <TagInput
               value={labels}
@@ -847,42 +791,24 @@ export default function VideosPage() {
               placeholder='选择或输入标签'
             />
           </div>
-          <div className='filter-block publish-block'>
+          <div className='filter-block span-4'>
             <label>发布时间</label>
-            <div className='date-quick'>
-              <button className={`btn ghost small ${quickDays === 3 ? 'active' : ''}`} onClick={() => applyQuickDays(3)}>3天内</button>
-              <button className={`btn ghost small ${quickDays === 7 ? 'active' : ''}`} onClick={() => applyQuickDays(7)}>7天内</button>
-              <button className={`btn ghost small ${quickDays === 15 ? 'active' : ''}`} onClick={() => applyQuickDays(15)}>15天内</button>
+            <div className='segmented'>
+              <button className={quickDays === 3 ? 'active' : ''} onClick={() => applyQuickDays(3)}>3天</button>
+              <button className={quickDays === 7 ? 'active' : ''} onClick={() => applyQuickDays(7)}>7天</button>
+              <button className={quickDays === 15 ? 'active' : ''} onClick={() => applyQuickDays(15)}>15天</button>
               <button
-                className={`btn ghost small ${customDate ? 'active' : ''}`}
+                className={customDate ? 'active' : ''}
                 onClick={() => {
                   setQuickDays(null)
                   setCustomDate(true)
-                  if (publishFrom || publishTo) {
-                    setDateRange({
-                      from: publishFrom ? dayjs(publishFrom).toDate() : undefined,
-                      to: publishTo ? dayjs(publishTo).toDate() : undefined,
-                    })
-                  }
                 }}
               >
                 自定义
               </button>
             </div>
           </div>
-          <div className='filter-block'>
-            <label>最小播放量</label>
-            <input
-              className='filter-control'
-              type='number'
-              min='0'
-              step='1'
-              placeholder='输入播放量'
-              value={minViews}
-              onChange={(e) => setMinViews(e.target.value.replace(/[^\d]/g, ''))}
-            />
-          </div>
-          <div className='filter-block'>
+          <div className='filter-block span-3'>
             <label>排序</label>
             <select
               className='filter-control'
@@ -905,60 +831,91 @@ export default function VideosPage() {
               <option value='status_updated_at:asc'>状态更新时间 旧→新</option>
             </select>
           </div>
-          <div className='filter-actions'>
-            <button className='btn ghost small' onClick={clearAll} disabled={!canClear}>清空全部</button>
+        </div>
+
+        <div className='filters-grid'>
+          <div className='filter-block span-4'>
+            <label>BVID</label>
+            <input
+              className='filter-control'
+              placeholder='输入BV号（支持逗号分隔）'
+              value={bvidKeyword}
+              onChange={(e) => setBvidKeyword(e.target.value)}
+            />
+          </div>
+          <div className='filter-block span-5'>
+            <label>视频标题关键词</label>
+            <input
+              className='filter-control'
+              placeholder='输入标题关键词'
+              value={titleKeyword}
+              onChange={(e) => setTitleKeyword(e.target.value)}
+            />
+          </div>
+          <div className='filter-block span-3'>
+            <label>粉丝量 ≥</label>
+            <input
+              className='filter-control'
+              type='number'
+              min='0'
+              step='1'
+              placeholder='例如 1000'
+              value={minFans}
+              onChange={(e) => setMinFans(e.target.value.replace(/[^\d]/g, ''))}
+            />
           </div>
         </div>
+
         {customDate && (
-          <div className='filters-bottom'>
-            <div className='date-picker-panel'>
-              <div className='date-picker-header'>
-                <span>选择日期区间</span>
-                <div className='date-range-summary'>
-                  {publishFrom || '--'} <span>至</span> {publishTo || '--'}
-                </div>
-              </div>
-              <DayPicker
-                mode='range'
-                numberOfMonths={2}
-                selected={dateRange}
-                onSelect={(range) => {
-                  setQuickDays(null)
-                  setCustomDate(true)
-                  applyRange(range)
-                }}
-              />
-              <div className='date-picker-footer'>
-                <div className='preset-row'>
-                  {presets.map((preset) => (
-                    <button
-                      key={preset.label}
-                      className='btn ghost small'
-                      onClick={() => {
-                        setQuickDays(null)
-                        setCustomDate(true)
-                        const next = preset.range()
-                        applyRange(next)
-                      }}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-                <button className='btn primary small' onClick={() => setCustomDate(false)}>确定</button>
+          <div className='filters-grid date-range-row'>
+            <div className='filter-block span-6'>
+              <label>日期范围</label>
+              <div className='date-range-inline'>
+                <input type='date' value={publishFrom} onChange={(e) => applyRange({
+                  from: e.target.value ? dayjs(e.target.value).toDate() : undefined,
+                  to: publishTo ? dayjs(publishTo).toDate() : undefined,
+                })} />
+                <span>至</span>
+                <input type='date' value={publishTo} onChange={(e) => applyRange({
+                  from: publishFrom ? dayjs(publishFrom).toDate() : undefined,
+                  to: e.target.value ? dayjs(e.target.value).toDate() : undefined,
+                })} />
+                <button className='btn ghost small' onClick={() => setCustomDate(false)}>收起</button>
               </div>
             </div>
           </div>
         )}
-        <div className='filters-extra'>
-          <div className='favorite-toggle'>
-            <button
-              className={`btn ghost small ${favoritedOnly ? 'active' : ''}`}
-              onClick={() => setFavoritedOnly((prev) => !prev)}
-            >
-              ⭐ 只看收藏
-            </button>
-          </div>
+      </div>
+
+      <div className='filter-summary'>
+        <div className='summary-text'>
+          {(() => {
+            const items: string[] = []
+            if (statusTab && statusTab !== 'all') items.push(`状态 ${statusLabelMap[statusTab] || statusTab}`)
+            if (labels.length) items.push(`标签 ${labels.join('、')}`)
+            if (quickDays) items.push(`发布时间 ${quickDays}天内`)
+            if (!quickDays && (publishFrom || publishTo)) items.push(`发布时间 ${publishFrom || '--'}~${publishTo || '--'}`)
+            if (bvidKeyword.trim()) items.push(`BVID ${bvidKeyword.trim()}`)
+            if (titleKeyword.trim()) items.push(`标题含 ${titleKeyword.trim()}`)
+            if (minFans) items.push(`粉丝≥${minFans}`)
+            if (favoritedOnly) items.push('只看收藏')
+            return items.length ? `已选条件：${items.join(' · ')}` : '未设置筛选条件'
+          })()}
+        </div>
+        <div className='summary-actions'>
+          <Link to='/covers' className='btn ghost'>封面库</Link>
+          <ExportPanel
+            baseUrl={baseUrl}
+            label='导出筛选'
+            filters={{
+              tags: labels.join(','),
+              publish_from: publishFrom,
+              publish_to: publishTo,
+              bvid: bvidKeyword.trim(),
+              title: titleKeyword.trim(),
+              min_fans: minFans,
+            }}
+          />
         </div>
       </div>
 

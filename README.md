@@ -38,3 +38,12 @@ cd backend
 celery -A app.workers.celery_app.celery_app worker -l info
 celery -A app.workers.celery_app.celery_app beat -l info
 ```
+
+### 数据库迁移（可选）
+
+如需删除已废弃的 `videos.is_unread` 与 `videos.seen_at` 列，可执行：
+
+```bash
+cd backend
+python scripts/remove_unread_columns.py
+```

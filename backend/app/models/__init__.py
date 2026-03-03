@@ -13,6 +13,7 @@ from app.models.video_frame import VideoFrame
 from app.models.comment_crawl_job import CommentCrawlJob
 from app.models.product import Product
 from app.models.product_mention import ProductMention
+from app.models.followed_creator import FollowedCreator
 
 __all__ = [
     "Task",
@@ -30,4 +31,5 @@ __all__ = [
     "CommentCrawlJob",
     "Product",
     "ProductMention",
+    "FollowedCreator",
 ]

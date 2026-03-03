@@ -72,7 +72,7 @@
   "tags": {"basic_hot": {"is_hit": false, "reason": []}, "low_fan_hot": {"is_hit": false, "reason": []}},
   "source_task_ids": ["uuid"],
   "source_task_names": ["string"],
-  "process_status": "todo|done",
+  "process_status": "todo|to_shoot|shot|published|dropped",
   "note": "string"
 }
 ```
@@ -202,12 +202,13 @@
 
 - `GET /videos`
   - Query：
-    - `task_id`, `tag=basic_hot|low_fan_hot`, `process_status=todo|done`
+    - `task_id`, `source=task|creator_watch`, `up_ids=uid,uid`, `creator_group=分组名`
+    - `tag=basic_hot|low_fan_hot`, `process_status=todo|to_shoot|shot|published|dropped`
     - `publish_from`, `publish_to`, `fetch_from`, `fetch_to`（ISO8601）
     - `min_views`, `min_fav`, `min_coin`, `min_reply`
     - `min_fav_rate`, `min_coin_rate`, `min_reply_rate`, `min_fav_fan_ratio`
     - `fan_max`
-    - `sort=views|fav|coin|reply|fav_rate|coin_rate|reply_rate|fav_fan_ratio|publish_time|fetch_time`
+    - `sort=views|fav|coin|reply|fav_rate|coin_rate|reply_rate|fav_fan_ratio|publish_time|fetch_time|views_delta_1d`
     - `page`, `page_size`
   - 返回：分页 `Video`
 
@@ -217,6 +218,20 @@
     - `fields=bvid,title,...`
     - `include_missing=true|false`
   - 返回：CSV 文件（`text/csv`）
+
+## Creators
+
+- `GET /creators`
+  - Query：`q`（昵称/UID/备注模糊）, `group`, `enabled`, `page`, `page_size`
+  - 返回：分页 Creator
+
+- `POST /creators`
+  - Body：`{ up_id_or_url, note?, group_tags?, monitor_enabled? }`
+
+- `PUT /creators/{up_id}`
+  - Body：`{ note?, group_tags?, monitor_enabled?, refresh_profile? }`
+
+- `DELETE /creators/{up_id}`
 
 - `POST /videos/process_status/batch`
   - Body：`{"bvids":["BV..."],"process_status":"todo|done"}`

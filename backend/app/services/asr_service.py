@@ -326,9 +326,20 @@ def _transcribe_with_baidu(audio_url: str) -> str | None:
             "speech": b64encode(chunk).decode("utf-8"),
             "dev_pid": int(settings.baidu_dev_pid or 1537),
         }
-        res = httpx.post(settings.baidu_asr_endpoint, json=payload, timeout=60)
-        res.raise_for_status()
-        data = res.json() if res.content else {}
+        data = {}
+        last_exc = None
+        for attempt in range(3):
+            try:
+                res = httpx.post(settings.baidu_asr_endpoint, json=payload, timeout=120)
+                res.raise_for_status()
+                data = res.json() if res.content else {}
+                last_exc = None
+                break
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                time.sleep(1 + attempt)
+        if last_exc is not None:
+            raise RuntimeError("baidu asr timeout")
         err_no = data.get("err_no")
         if err_no not in (0, "0", None):
             err_no = data.get("err_no")

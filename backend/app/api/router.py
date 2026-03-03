@@ -12,6 +12,8 @@ from app.routes.tags import router as tags_router
 from app.routes.covers import router as covers_router
 from app.routes.frames import router as frames_router
 from app.routes.products import router as products_router
+from app.routes.creators import router as creators_router
+from app.routes.proxy import router as proxy_router
 from app.routes.comment_jobs import router as comment_jobs_router
 
 api_router = APIRouter()
@@ -27,4 +29,6 @@ api_router.include_router(videos_router, prefix="/videos", tags=["videos"])
 api_router.include_router(covers_router, prefix="/covers", tags=["covers"])
 api_router.include_router(frames_router, tags=["frames"])
 api_router.include_router(products_router, prefix="/products", tags=["products"])
+api_router.include_router(creators_router, prefix="/creators", tags=["creators"])
+api_router.include_router(proxy_router, prefix="/proxy", tags=["proxy"])
 api_router.include_router(comment_jobs_router, prefix="/comment_jobs", tags=["comment_jobs"])

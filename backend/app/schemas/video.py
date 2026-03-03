@@ -17,6 +17,7 @@ class VideoOut(BaseModel):
     is_favorited: bool = False
     favorited_at: datetime | None = None
     status_updated_at: datetime | None = None
+    source: str | None = None
     is_cover_favorited: bool = False
     cover_favorite_id: str | None = None
     stats: dict[str, Any]

@@ -281,6 +281,8 @@ class TaskRunner:
         video.publish_time = publish_time or video.publish_time
         video.cover_url = computed["cover_url"] or video.cover_url
         video.fetch_time = datetime.utcnow()
+        if not getattr(video, "source", None):
+            video.source = "task"
 
         video.views = int(stats.get("views", 0) or 0)
         video.like = int(stats.get("like", 0) or 0)

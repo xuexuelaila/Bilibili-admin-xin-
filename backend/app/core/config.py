@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     refresh_all_enabled: bool = True
     refresh_all_time: str = "03:00"
     refresh_all_batch_size: int = 50
+    creator_watch_interval_minutes: int = 45
+    creator_watch_fetch_limit: int = 20
     comment_crawl_limit: int = 500
     comment_crawl_limit_max: int = 1000
     comment_crawl_min_views: int = 0
@@ -48,7 +50,7 @@ class Settings(BaseSettings):
     baidu_asr_endpoint: str = "https://vop.baidu.com/server_api"
     baidu_dev_pid: int = 1537
     baidu_cuid: str = "bili-admin"
-    baidu_segment_seconds: int = 55
+    baidu_segment_seconds: int = 20
     tos_access_key: str | None = None
     tos_secret_key: str | None = None
     tos_endpoint: str | None = None
@@ -68,7 +70,18 @@ class Settings(BaseSettings):
             return []
         if raw.startswith("[") and raw.endswith("]"):
             raw = raw.strip("[]")
-        return [item.strip() for item in raw.split(",") if item.strip()]
+        origins = [item.strip() for item in raw.split(",") if item.strip()]
+        # Add localhost/127.0.0.1 variants to avoid CORS mismatch in dev.
+        extras: list[str] = []
+        for origin in origins:
+            if "localhost" in origin:
+                extras.append(origin.replace("localhost", "127.0.0.1"))
+            if "127.0.0.1" in origin:
+                extras.append(origin.replace("127.0.0.1", "localhost"))
+        for extra in extras:
+            if extra not in origins:
+                origins.append(extra)
+        return origins
 
     @property
     def product_domain_list(self) -> list[str]:

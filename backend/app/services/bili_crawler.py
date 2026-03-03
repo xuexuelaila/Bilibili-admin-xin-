@@ -138,15 +138,48 @@ class CrawlerBiliClient(BiliClient):
 
     def get_up_info(self, up_id: str) -> dict[str, Any]:
         if not up_id:
-            return {"up_name": "", "follower_count": 0}
+            return {"up_name": "", "follower_count": 0, "following_count": 0}
         url = "https://api.bilibili.com/x/relation/stat"
         params = {"vmid": up_id}
         data = self._request_json(url, params)
         if not data:
-            return {"up_name": "", "follower_count": 0}
+            return {"up_name": "", "follower_count": 0, "following_count": 0}
         payload = data.get("data") if isinstance(data, dict) else {}
         follower = int(payload.get("follower", 0) or 0) if isinstance(payload, dict) else 0
-        return {"up_name": "", "follower_count": follower}
+        following = int(payload.get("following", 0) or 0) if isinstance(payload, dict) else 0
+        return {"up_name": "", "follower_count": follower, "following_count": following}
+
+    def get_up_profile(self, up_id: str) -> dict[str, Any]:
+        if not up_id:
+            return {"up_name": "", "avatar": None}
+        url = "https://api.bilibili.com/x/space/acc/info"
+        params = {"mid": up_id}
+        data = self._request_json(url, params)
+        if not data or data.get("code") not in (0, None):
+            return {"up_name": "", "avatar": None}
+        payload = data.get("data") if isinstance(data, dict) else {}
+        if not isinstance(payload, dict):
+            return {"up_name": "", "avatar": None}
+        return {
+            "up_name": payload.get("name") or "",
+            "avatar": _normalize_url(payload.get("face")),
+        }
+
+    def get_up_stats(self, up_id: str) -> dict[str, Any]:
+        if not up_id:
+            return {"view_count": 0, "like_count": 0}
+        url = "https://api.bilibili.com/x/space/upstat"
+        params = {"mid": up_id}
+        data = self._request_json(url, params)
+        if not data or data.get("code") not in (0, None):
+            return {"view_count": 0, "like_count": 0}
+        payload = data.get("data") if isinstance(data, dict) else {}
+        if not isinstance(payload, dict):
+            return {"view_count": 0, "like_count": 0}
+        archive = payload.get("archive") if isinstance(payload.get("archive"), dict) else {}
+        view_count = int(archive.get("view", 0) or 0) if isinstance(archive, dict) else 0
+        like_count = int(archive.get("like", 0) or 0) if isinstance(archive, dict) else 0
+        return {"view_count": view_count, "like_count": like_count}
 
     def get_subtitle(self, bvid: str) -> str | None:
         detail = self.get_video_detail(bvid)
@@ -278,6 +311,54 @@ class CrawlerBiliClient(BiliClient):
         for reply in raw_replies[:max_limit]:
             _collect_comment(reply, normalized)
         return normalized
+
+    def get_creator_videos(self, up_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        if not up_id:
+            return []
+        page_size = max(1, min(int(limit), 50))
+        page = 1
+        results: list[dict[str, Any]] = []
+        wbi_url = "https://api.bilibili.com/x/space/wbi/arc/search"
+        fallback_url = "https://api.bilibili.com/x/space/arc/search"
+
+        while len(results) < int(limit):
+            params = {"mid": up_id, "pn": page, "ps": page_size, "order": "pubdate"}
+            data = self._request_json_wbi(wbi_url, params) or self._request_json(fallback_url, params)
+            if not data or data.get("code") not in (0, None):
+                break
+            payload = data.get("data") if isinstance(data, dict) else {}
+            if not isinstance(payload, dict):
+                break
+            listing = payload.get("list") if isinstance(payload.get("list"), dict) else {}
+            vlist = listing.get("vlist") if isinstance(listing, dict) else []
+            if not isinstance(vlist, list) or not vlist:
+                break
+            for item in vlist:
+                if not isinstance(item, dict):
+                    continue
+                results.append(
+                    {
+                        "bvid": item.get("bvid") or "",
+                        "title": _strip_html(item.get("title") or ""),
+                        "up_id": str(item.get("mid") or up_id),
+                        "up_name": item.get("author") or "",
+                        "publish_time": _parse_time(item.get("created")),
+                        "cover_url": _normalize_url(item.get("pic")),
+                        "stats": {
+                            "views": int(item.get("play", 0) or 0),
+                            "like": int(item.get("like", 0) or 0),
+                            "fav": int(item.get("favorite", 0) or 0),
+                            "coin": int(item.get("coin", 0) or 0),
+                            "reply": int(item.get("comment", 0) or 0),
+                            "share": int(item.get("share", 0) or 0),
+                        },
+                    }
+                )
+            if len(vlist) < page_size:
+                break
+            page += 1
+
+        return results[: int(limit)]
 
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         for attempt in range(self.retry_times + 1):
@@ -570,6 +651,8 @@ def _normalize_url(url: Any) -> str | None:
     if isinstance(url, str):
         if url.startswith("//"):
             return "https:" + url
+        if url.startswith("http://") and "hdslb.com" in url:
+            return "https://" + url[len("http://"):]
         return url
     return None
 

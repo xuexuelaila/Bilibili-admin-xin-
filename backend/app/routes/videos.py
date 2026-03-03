@@ -4,7 +4,7 @@ import os
 import zipfile
 import json
 from urllib.parse import urlparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
@@ -12,7 +12,7 @@ from sqlalchemy import select, func, or_, String, cast, case
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Video, TaskVideo, Subtitle, Task, CoverFavorite
+from app.models import Video, TaskVideo, Subtitle, Task, CoverFavorite, FollowedCreator
 from app.schemas.video import VideoOut
 from app.schemas.subtitle import SubtitleOut
 from app.schemas.pagination import Page
@@ -27,6 +27,12 @@ router = APIRouter()
 def list_videos(
     db: Session = Depends(get_db),
     task_id: str | None = None,
+    source: str | None = None,
+    up_ids: str | None = None,
+    bvid: str | None = None,
+    title: str | None = None,
+    creator_group: str | None = None,
+    days: int | None = None,
     tag: str | None = None,
     process_status: str | None = None,
     status: str | None = None,
@@ -45,6 +51,7 @@ def list_videos(
     min_coin_rate: float | None = None,
     min_reply_rate: float | None = None,
     min_fav_fan_ratio: float | None = None,
+    min_fans: int | None = None,
     fan_max: int | None = None,
     sort: str | None = None,
     order: str | None = None,
@@ -55,6 +62,28 @@ def list_videos(
 
     if task_id:
         query = query.join(TaskVideo).where(TaskVideo.task_id == task_id)
+    if source:
+        query = query.where(Video.source == source)
+    if up_ids:
+        up_list = [u.strip() for u in up_ids.split(",") if u.strip()]
+        if up_list:
+            query = query.where(Video.up_id.in_(up_list))
+    if bvid:
+        bvid_list = [b.strip() for b in bvid.split(",") if b.strip()]
+        if bvid_list:
+            if len(bvid_list) == 1:
+                query = query.where(Video.bvid.ilike(f"%{bvid_list[0]}%"))
+            else:
+                query = query.where(or_(*[Video.bvid.ilike(f"%{item}%") for item in bvid_list]))
+    if title:
+        keyword = title.strip()
+        if keyword:
+            query = query.where(Video.title.ilike(f"%{keyword}%"))
+    if creator_group:
+        lowered = func.lower(cast(FollowedCreator.group_tags, String))
+        query = query.join(FollowedCreator, FollowedCreator.up_id == Video.up_id).where(
+            lowered.like(f'%\"{creator_group.strip().lower()}\"%')
+        )
     if tag == "basic_hot":
         query = query.where(Video.basic_hot == True)  # noqa: E712
     if tag == "low_fan_hot":
@@ -95,6 +124,12 @@ def list_videos(
         query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
     if publish_to:
         query = query.where(Video.publish_time <= datetime.fromisoformat(publish_to))
+    if days is not None:
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=int(days))
+            query = query.where(Video.publish_time >= cutoff)
+        except Exception:
+            pass
     if fetch_from:
         query = query.where(Video.fetch_time >= datetime.fromisoformat(fetch_from))
     if fetch_to:
@@ -116,6 +151,8 @@ def list_videos(
         query = query.where(Video.reply_rate >= min_reply_rate)
     if min_fav_fan_ratio is not None:
         query = query.where(Video.fav_fan_ratio >= min_fav_fan_ratio)
+    if min_fans is not None:
+        query = query.where(Video.follower_count >= min_fans)
     if fan_max is not None:
         query = query.where(Video.follower_count <= fan_max)
 
@@ -184,10 +221,14 @@ def list_videos(
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
+
+
 @router.get("/export")
 def export_csv(
     db: Session = Depends(get_db),
     bvids: str | None = None,
+    bvid: str | None = None,
+    title: str | None = None,
     task_id: str | None = None,
     tag: str | None = None,
     process_status: str | None = None,
@@ -205,6 +246,7 @@ def export_csv(
     min_coin_rate: float | None = None,
     min_reply_rate: float | None = None,
     min_fav_fan_ratio: float | None = None,
+    min_fans: int | None = None,
     fan_max: int | None = None,
     sort: str | None = None,
     fields: str | None = None,
@@ -215,6 +257,17 @@ def export_csv(
         bvid_list = [b.strip() for b in bvids.split(',') if b.strip()]
         if bvid_list:
             query = query.where(Video.bvid.in_(bvid_list))
+    if bvid:
+        bvid_list = [b.strip() for b in bvid.split(",") if b.strip()]
+        if bvid_list:
+            if len(bvid_list) == 1:
+                query = query.where(Video.bvid.ilike(f"%{bvid_list[0]}%"))
+            else:
+                query = query.where(or_(*[Video.bvid.ilike(f"%{item}%") for item in bvid_list]))
+    if title:
+        keyword = title.strip()
+        if keyword:
+            query = query.where(Video.title.ilike(f"%{keyword}%"))
     if task_id:
         query = query.join(TaskVideo).where(TaskVideo.task_id == task_id)
     if tag == "basic_hot":
@@ -271,6 +324,8 @@ def export_csv(
         query = query.where(Video.reply_rate >= min_reply_rate)
     if min_fav_fan_ratio is not None:
         query = query.where(Video.fav_fan_ratio >= min_fav_fan_ratio)
+    if min_fans is not None:
+        query = query.where(Video.follower_count >= min_fans)
     if fan_max is not None:
         query = query.where(Video.follower_count <= fan_max)
 
@@ -775,6 +830,7 @@ def video_to_out(
         is_favorited=bool(video.is_favorited),
         favorited_at=video.favorited_at,
         status_updated_at=video.status_updated_at,
+        source=getattr(video, "source", None),
         is_cover_favorited=bool(cover.id) if cover else False,
         cover_favorite_id=cover.id if cover else None,
         stats=stats,
