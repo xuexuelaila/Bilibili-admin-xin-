@@ -12,3 +12,6 @@ node_modules/
 
 # SQLite
 *.db
+
+# generated frames
+backend/frames/
