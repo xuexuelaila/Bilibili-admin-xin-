@@ -79,16 +79,6 @@ const statusOptions = [
   { value: 'dropped', label: '淘汰' },
 ]
 
-const statusLabelMap = statusOptions.reduce<Record<string, string>>((acc, item) => {
-  acc[item.value] = item.label
-  return acc
-}, {})
-
-const statusTabs = [
-  { value: 'all', label: '全部' },
-  ...statusOptions,
-]
-
 export default function CreatorCenterPage() {
   const [creators, setCreators] = useState<Creator[]>([])
   const [creatorQ, setCreatorQ] = useState('')
@@ -113,7 +103,6 @@ export default function CreatorCenterPage() {
   const [days, setDays] = useState<number | null>(7)
   const [publishFrom, setPublishFrom] = useState('')
   const [publishTo, setPublishTo] = useState('')
-  const [processStatus, setProcessStatus] = useState('all')
   const [bvidKeyword, setBvidKeyword] = useState('')
   const [titleKeyword, setTitleKeyword] = useState('')
   const [minFans, setMinFans] = useState('')
@@ -191,7 +180,6 @@ export default function CreatorCenterPage() {
     days,
     publishFrom,
     publishTo,
-    processStatus,
     bvid: bvidKeyword.trim(),
     title: titleKeyword.trim(),
     minFans,
@@ -231,11 +219,11 @@ export default function CreatorCenterPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [effectiveUpIds, days, publishFrom, publishTo, processStatus, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder])
+  }, [effectiveUpIds, days, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder])
 
   useEffect(() => {
     setSelectedVideos([])
-  }, [effectiveUpIds, days, publishFrom, publishTo, processStatus, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder, page, pageSize])
+  }, [effectiveUpIds, days, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     if (!frameJob?.id) return
@@ -285,7 +273,6 @@ export default function CreatorCenterPage() {
     days !== 7 ||
     !!publishFrom ||
     !!publishTo ||
-    processStatus !== 'all' ||
     !!bvidKeyword ||
     !!titleKeyword ||
     !!minFans ||
@@ -296,7 +283,6 @@ export default function CreatorCenterPage() {
     setDays(7)
     setPublishFrom('')
     setPublishTo('')
-    setProcessStatus('all')
     setBvidKeyword('')
     setTitleKeyword('')
     setMinFans('')
@@ -829,9 +815,6 @@ export default function CreatorCenterPage() {
   const updateProcessStatus = async (video: Video, status: string) => {
     await api.post(`/api/videos/${video.bvid}/process_status`, { process_status: status })
     setVideoList((prev) => {
-      if (processStatus !== 'all' && processStatus !== status) {
-        return prev.filter((v) => v.bvid !== video.bvid)
-      }
       return prev.map((v) =>
         v.bvid === video.bvid ? { ...v, process_status: status, status_updated_at: new Date().toISOString() } : v
       )
@@ -1001,21 +984,7 @@ export default function CreatorCenterPage() {
 
           <div className='stream-filter-card'>
             <div className='filters-grid row-1'>
-              <div className='filter-block span-4'>
-                <label>状态</label>
-                <div className='segmented'>
-                  {statusTabs.map((tab) => (
-                    <button
-                      key={tab.value}
-                      className={processStatus === tab.value ? 'active' : ''}
-                      onClick={() => setProcessStatus(tab.value)}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className='filter-block span-4'>
+              <div className='filter-block span-5'>
                 <label>时间</label>
                 <div className='segmented'>
                   <button className={days === 1 ? 'active' : ''} onClick={() => applyQuickDays(1)}>24h</button>
@@ -1024,7 +993,7 @@ export default function CreatorCenterPage() {
                   <button className={days === null ? 'active' : ''} onClick={() => applyQuickDays(null)}>自定义</button>
                 </div>
               </div>
-              <div className='filter-block span-3'>
+              <div className='filter-block span-4'>
                 <label>排序</label>
                 <select className='filter-control' value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
                   <option value='publish_time'>发布时间 新→旧</option>
@@ -1032,7 +1001,7 @@ export default function CreatorCenterPage() {
                   <option value='views_delta_1d'>单日新增 高→低</option>
                 </select>
               </div>
-              <div className='filter-block span-1 filter-actions'>
+              <div className='filter-block span-3 filter-actions'>
                 <label>&nbsp;</label>
                 <button className='btn ghost small weak' onClick={clearStreamFilters} disabled={!canClearStreamFilters}>
                   清空全部

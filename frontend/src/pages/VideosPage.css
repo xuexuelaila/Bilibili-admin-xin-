@@ -88,6 +88,19 @@
 .video-actions::-webkit-scrollbar-thumb { background: #d3d9df; border-radius: 999px; }
 .video-actions::-webkit-scrollbar-track { background: transparent; }
 .subtitle-actions { position: relative; }
+.subtitle-progress {
+  margin-top: 6px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 8px;
+  width: 180px;
+}
+.subtitle-progress .progress-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.subtitle-progress .progress-bar { background: #eee7de; border-radius: 6px; height: 6px; overflow: hidden; }
+.subtitle-progress .progress-bar span { display: block; height: 100%; background: var(--accent); }
+.subtitle-error-inline { margin-top: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8a1f1f; }
+.subtitle-toast { display: flex; align-items: center; gap: 8px; }
 
 .subtitle-modal-mask { position: fixed; inset: 0; background: rgba(17, 20, 26, 0.45); display: grid; place-items: center; z-index: 200; padding: 20px; }
 .subtitle-modal { width: min(960px, 94vw); max-height: 86vh; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; display: grid; grid-template-rows: auto 1fr auto; box-shadow: 0 30px 60px rgba(0,0,0,0.2); overflow: hidden; }

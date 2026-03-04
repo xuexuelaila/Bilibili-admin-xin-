@@ -93,6 +93,9 @@ export default function VideosPage() {
   const [subtitleModal, setSubtitleModal] = useState<string | null>(null)
   const [subtitleSearch, setSubtitleSearch] = useState('')
   const [subtitleMap, setSubtitleMap] = useState<Record<string, SubtitleState>>({})
+  const [subtitleProgress, setSubtitleProgress] = useState<Record<string, { progress: number; stage: string }>>({})
+  const [subtitleToast, setSubtitleToast] = useState<{ bvid: string; message: string } | null>(null)
+  const [subtitleCardVisible, setSubtitleCardVisible] = useState<Record<string, boolean>>({})
   const [toast, setToast] = useState<string | null>(null)
   const [frameModal, setFrameModal] = useState<string | null>(null)
   const [frameVideo, setFrameVideo] = useState<Video | null>(null)
@@ -227,6 +230,17 @@ export default function VideosPage() {
   const showToast = (message: string) => {
     setToast(message)
     window.setTimeout(() => setToast(null), 2000)
+  }
+  const showSubtitleToast = (bvid: string, message: string) => {
+    setSubtitleToast({ bvid, message })
+    window.setTimeout(() => setSubtitleToast(null), 4000)
+  }
+
+  const updateSubtitleProgress = (bvid: string, progress: number, stage: string) => {
+    setSubtitleProgress((prev) => ({
+      ...prev,
+      [bvid]: { progress, stage },
+    }))
   }
 
   const openFrameModal = async (video: Video) => {
@@ -434,6 +448,9 @@ export default function VideosPage() {
   }
 
   const pollSubtitle = async (bvid: string, attempts = 60, interval = 2000) => {
+    const startedAt = Date.now()
+    const current = subtitleProgress[bvid]?.progress || 0
+    updateSubtitleProgress(bvid, Math.max(current, 10), '准备中')
     for (let i = 0; i < attempts; i++) {
       try {
         const res = await api.get(`/api/videos/${bvid}/subtitle`)
@@ -445,6 +462,18 @@ export default function VideosPage() {
           errorDetail: res.data?.error_detail || '',
           updatedAt: res.data?.updated_at || '',
         })
+        const elapsed = Date.now() - startedAt
+        if (status === 'extracting') {
+          if (elapsed < 30_000) {
+            updateSubtitleProgress(bvid, Math.min(20 + (elapsed / 30_000) * 20, 40), '识别中')
+          } else if (elapsed < 90_000) {
+            updateSubtitleProgress(bvid, Math.min(40 + (elapsed - 30_000) / 60_000 * 40, 80), '识别中')
+          } else if (elapsed < 120_000) {
+            updateSubtitleProgress(bvid, Math.min(80 + (elapsed - 90_000) / 30_000 * 15, 95), '生成中')
+          } else {
+            updateSubtitleProgress(bvid, 96, '保存中')
+          }
+        }
         if (status === 'done') return res.data?.text || ''
         if (status === 'failed') throw new Error(res.data?.error || '字幕提取失败')
       } catch {
@@ -461,17 +490,21 @@ export default function VideosPage() {
       return await pollSubtitle(bvid)
     }
     updateSubtitleState(bvid, { status: 'extracting', error: '', errorDetail: '' })
+    updateSubtitleProgress(bvid, 5, '准备中')
     await api.post(`/api/videos/${bvid}/subtitle/extract`)
     try {
       const text = await pollSubtitle(bvid)
+      updateSubtitleProgress(bvid, 100, '完成')
       return text || ''
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('超时')) {
         // Keep showing extracting; the backend job may still be running.
         updateSubtitleState(bvid, { status: 'extracting' })
+        updateSubtitleProgress(bvid, Math.min(subtitleProgress[bvid]?.progress || 90, 95), '保存中')
       } else {
         updateSubtitleState(bvid, { status: 'failed' })
+        updateSubtitleProgress(bvid, 0, '失败')
       }
     }
     return ''
@@ -1086,16 +1119,64 @@ export default function VideosPage() {
                     <span className='tag-text'>标签：{v.labels.join(' / ')}</span>
                   )}
                 </div>
-                <div className='video-actions'>
-                  <div className='subtitle-actions'>
+                <div
+                  className='video-actions'
+                  ref={(el) => {
+                    if (!el) return
+                    if ((el as any)._subtitleObserverAttached) return
+                    ;(el as any)._subtitleObserverAttached = true
+                    const card = el.closest('.video-card') as HTMLElement | null
+                    if (!card) return
+                    const bvid = (card.querySelector('.subtitle-actions') as HTMLElement | null)?.dataset?.bvid
+                    if (!bvid) return
+                    const observer = new IntersectionObserver((entries) => {
+                      const visible = entries.some((entry) => entry.isIntersecting)
+                      setSubtitleCardVisible((prev) => ({ ...prev, [bvid]: visible }))
+                    }, { threshold: 0.35 })
+                    observer.observe(card)
+                  }}
+                >
+                  <div className='subtitle-actions' data-bvid={v.bvid}>
                     <button
                       className='btn ghost'
-                      onClick={() => openSubtitleModal(v.bvid)}
-                      disabled={subtitleMap[v.bvid]?.status === 'extracting'}
-                      title='打开字幕弹窗'
+                      onClick={async () => {
+                        const status = subtitleMap[v.bvid]?.status || 'none'
+                        if (status === 'extracting') return
+                        if (status === 'done') {
+                          setSubtitleModal(v.bvid)
+                          return
+                        }
+                        const text = await startExtractSubtitle(v.bvid)
+                        const inView = subtitleCardVisible[v.bvid]
+                        if (text) {
+                          if (inView) {
+                            setSubtitleModal(v.bvid)
+                          } else {
+                            showSubtitleToast(v.bvid, '字幕提取完成')
+                          }
+                        }
+                      }}
+                      title='提取字幕'
                     >
                       字幕
                     </button>
+                    {subtitleMap[v.bvid]?.status === 'extracting' && (
+                      <div className='subtitle-progress'>
+                        <div className='progress-meta'>
+                          <span>{subtitleProgress[v.bvid]?.stage || '提取中'}</span>
+                          <span>{Math.round(subtitleProgress[v.bvid]?.progress || 0)}%</span>
+                        </div>
+                        <div className='progress-bar'>
+                          <span style={{ width: `${subtitleProgress[v.bvid]?.progress || 0}%` }} />
+                        </div>
+                      </div>
+                    )}
+                    {subtitleMap[v.bvid]?.status === 'failed' && (
+                      <div className='subtitle-error-inline'>
+                        <span>提取失败</span>
+                        <button className='btn ghost small' onClick={() => startExtractSubtitle(v.bvid)}>重试</button>
+                      </div>
+                    )}
                   </div>
                   <button className='btn ghost' onClick={() => openTagModal(v)}>编辑标签</button>
                   <button className='btn ghost' onClick={() => openFrameModal(v)}>帧文件夹</button>
@@ -1483,6 +1564,20 @@ export default function VideosPage() {
                 : '--'}
             </div>
           </div>
+        </div>
+      )}
+      {subtitleToast && (
+        <div className='toast subtitle-toast'>
+          <span>{subtitleToast.message}</span>
+          <button
+            className='btn ghost small'
+            onClick={() => {
+              setSubtitleModal(subtitleToast.bvid)
+              setSubtitleToast(null)
+            }}
+          >
+            查看
+          </button>
         </div>
       )}
       {toast && <div className='toast'>{toast}</div>}
