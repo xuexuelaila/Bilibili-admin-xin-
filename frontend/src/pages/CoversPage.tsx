@@ -58,7 +58,7 @@ const formatCount = (value?: number | null) => {
   return String(value)
 }
 
-export default function CoversPage() {
+export function CoversPanel({ showHeader = true }: { showHeader?: boolean }) {
   const [items, setItems] = useState<CoverFavorite[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -192,13 +192,15 @@ export default function CoversPage() {
   }
 
   return (
-    <div className='page'>
-      <header className='page-header'>
-        <div>
-          <h1>封面库</h1>
-          <p>收藏优质封面，快速复用与灵感参考。</p>
-        </div>
-      </header>
+    <div className={showHeader ? 'page' : 'covers-panel'}>
+      {showHeader && (
+        <header className='page-header'>
+          <div>
+            <h1>封面库</h1>
+            <p>收藏优质封面，快速复用与灵感参考。</p>
+          </div>
+        </header>
+      )}
 
       <div className='cover-filters'>
         <div className='filter-block'>
@@ -353,4 +355,8 @@ export default function CoversPage() {
       )}
     </div>
   )
+}
+
+export default function CoversPage() {
+  return <CoversPanel showHeader />
 }

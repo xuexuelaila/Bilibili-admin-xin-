@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { CoversPanel } from './CoversPage'
 import ExportPanel from '../components/ExportPanel'
 import '../components/ExportPanel.css'
 import Pagination from '../components/Pagination'
@@ -68,6 +68,7 @@ const formatCount = (value: number) => {
 }
 
 export default function VideosPage() {
+  const [libraryTab, setLibraryTab] = useState<'videos' | 'covers'>('videos')
   const [videos, setVideos] = useState<Video[]>([])
   const [labels, setLabels] = useState<string[]>([])
   const [tagOptions, setTagOptions] = useState<string[]>([])
@@ -137,20 +138,23 @@ export default function VideosPage() {
   }
 
   useEffect(() => {
+    if (libraryTab !== 'videos') return
     load()
-  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
+  }, [libraryTab, labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
   }, [])
 
   useEffect(() => {
+    if (libraryTab !== 'videos') return
     setPage(1)
-  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder])
+  }, [libraryTab, labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder])
 
   useEffect(() => {
+    if (libraryTab !== 'videos') return
     setSelected([])
-  }, [labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
+  }, [libraryTab, labels, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, favoritedOnly, statusTab, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     setCoverError({})
@@ -757,6 +761,19 @@ export default function VideosPage() {
         </div>
       </header>
 
+      <div className='library-tabs'>
+        <button className={`tab-btn ${libraryTab === 'videos' ? 'active' : ''}`} onClick={() => setLibraryTab('videos')}>
+          视频库
+        </button>
+        <button className={`tab-btn ${libraryTab === 'covers' ? 'active' : ''}`} onClick={() => setLibraryTab('covers')}>
+          封面库
+        </button>
+      </div>
+
+      {libraryTab === 'covers' ? (
+        <CoversPanel showHeader={false} />
+      ) : (
+        <>
       <div className='status-row'>
         <div className='status-tabs'>
           {statusTabs.map((tab) => (
@@ -791,7 +808,7 @@ export default function VideosPage() {
               placeholder='选择或输入标签'
             />
           </div>
-          <div className='filter-block span-4'>
+          <div className='filter-block span-4 time-block'>
             <label>发布时间</label>
             <div className='segmented'>
               <button className={quickDays === 3 ? 'active' : ''} onClick={() => applyQuickDays(3)}>3天</button>
@@ -807,6 +824,34 @@ export default function VideosPage() {
                 自定义
               </button>
             </div>
+            {customDate && (
+              <div className='time-popover' onClick={(e) => e.stopPropagation()}>
+                <div className='time-popover-header'>选择日期范围</div>
+                <div className='time-popover-inputs'>
+                  <input
+                    type='date'
+                    value={publishFrom}
+                    onChange={(e) => applyRange({
+                      from: e.target.value ? dayjs(e.target.value).toDate() : undefined,
+                      to: publishTo ? dayjs(publishTo).toDate() : undefined,
+                    })}
+                  />
+                  <span>至</span>
+                  <input
+                    type='date'
+                    value={publishTo}
+                    onChange={(e) => applyRange({
+                      from: publishFrom ? dayjs(publishFrom).toDate() : undefined,
+                      to: e.target.value ? dayjs(e.target.value).toDate() : undefined,
+                    })}
+                  />
+                </div>
+                <div className='time-popover-footer'>
+                  <button className='btn ghost small' onClick={() => setCustomDate(false)}>收起</button>
+                  <button className='btn primary small' onClick={() => setCustomDate(false)}>确定</button>
+                </div>
+              </div>
+            )}
           </div>
           <div className='filter-block span-3'>
             <label>排序</label>
@@ -866,25 +911,6 @@ export default function VideosPage() {
           </div>
         </div>
 
-        {customDate && (
-          <div className='filters-grid date-range-row'>
-            <div className='filter-block span-6'>
-              <label>日期范围</label>
-              <div className='date-range-inline'>
-                <input type='date' value={publishFrom} onChange={(e) => applyRange({
-                  from: e.target.value ? dayjs(e.target.value).toDate() : undefined,
-                  to: publishTo ? dayjs(publishTo).toDate() : undefined,
-                })} />
-                <span>至</span>
-                <input type='date' value={publishTo} onChange={(e) => applyRange({
-                  from: publishFrom ? dayjs(publishFrom).toDate() : undefined,
-                  to: e.target.value ? dayjs(e.target.value).toDate() : undefined,
-                })} />
-                <button className='btn ghost small' onClick={() => setCustomDate(false)}>收起</button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className='filter-summary'>
@@ -903,7 +929,6 @@ export default function VideosPage() {
           })()}
         </div>
         <div className='summary-actions'>
-          <Link to='/covers' className='btn ghost'>封面库</Link>
           <ExportPanel
             baseUrl={baseUrl}
             label='导出筛选'
@@ -1461,6 +1486,8 @@ export default function VideosPage() {
         </div>
       )}
       {toast && <div className='toast'>{toast}</div>}
+        </>
+      )}
     </div>
   )
 }

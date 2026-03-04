@@ -39,6 +39,8 @@
 .cover-preview img { width: 100%; height: auto; border-radius: 12px; }
 .cover-preview-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
+.covers-panel { display: grid; gap: 16px; }
+
 .empty { color: var(--muted); padding: 20px; }
 
 @media (max-width: 1400px) {

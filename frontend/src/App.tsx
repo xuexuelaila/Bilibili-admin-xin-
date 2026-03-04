@@ -6,7 +6,6 @@ import RunsPage from './pages/RunsPage'
 import RunDetailPage from './pages/RunDetailPage'
 import VideosPage from './pages/VideosPage'
 import ProductsPage from './pages/ProductsPage'
-import CoversPage from './pages/CoversPage'
 import SystemPage from './pages/SystemPage'
 import CreatorCenterPage from './pages/CreatorCenterPage'
 
@@ -23,7 +22,6 @@ export default function App() {
         <Route path='/runs/:runId' element={<RunDetailPage />} />
         <Route path='/videos' element={<VideosPage />} />
         <Route path='/products' element={<ProductsPage />} />
-        <Route path='/covers' element={<CoversPage />} />
         <Route path='/creator-center' element={<CreatorCenterPage />} />
         <Route path='/creator-updates' element={<Navigate to='/creator-center' replace />} />
         <Route path='/creators' element={<Navigate to='/creator-center' replace />} />
