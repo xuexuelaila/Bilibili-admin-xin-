@@ -37,6 +37,7 @@ export default function CreatorsPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const [newInput, setNewInput] = useState('')
   const [newNote, setNewNote] = useState('')
@@ -60,16 +61,25 @@ export default function CreatorsPage() {
 
   const load = async () => {
     setLoading(true)
+    setError(null)
     const params = new URLSearchParams()
     if (q) params.set('q', q)
     if (groupFilter) params.set('group', groupFilter)
     if (enabledFilter) params.set('enabled', enabledFilter)
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
-    const res = await api.get(`/api/creators?${params.toString()}`)
-    setCreators(res.data.items || [])
-    setTotal(res.data.total || 0)
-    setLoading(false)
+    try {
+      const res = await api.get(`/api/creators?${params.toString()}`)
+      setCreators(res.data.items || [])
+      setTotal(res.data.total || 0)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setCreators([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -201,7 +211,8 @@ export default function CreatorsPage() {
       </section>
 
       {loading ? <div className='muted'>加载中...</div> : null}
-      {!loading && creators.length === 0 ? <Empty text='暂无关注UP主' /> : null}
+      {error ? <Empty label={error} /> : null}
+      {!loading && !error && creators.length === 0 ? <Empty label='暂无关注UP主' /> : null}
 
       <div className='creator-table'>
         {creators.map((creator) => (

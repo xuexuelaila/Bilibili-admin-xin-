@@ -13,6 +13,7 @@ from app.schemas.pagination import Page
 from app.services.bili_client import MockBiliClient
 from app.services.bili_crawler import CrawlerBiliClient
 from app.services.settings_service import get_or_create_settings
+from app.services.creator_sync import sync_creator_videos
 
 router = APIRouter()
 
@@ -177,6 +178,18 @@ def create_creator(payload: dict, db: Session = Depends(get_db)):
         db.add(creator)
         db.commit()
         db.refresh(creator)
+        # On first follow, pull recent 30-day videos regardless of count.
+        try:
+            now = datetime.utcnow()
+            sync_creator_videos(db, creator, client, days_limit=30, now=now)
+            creator.last_checked_at = now
+            creator.last_success_at = now
+            creator.last_error_at = None
+            creator.last_error_msg = None
+            db.add(creator)
+            db.commit()
+        except Exception:
+            db.rollback()
         return {"ok": True, "creator": _creator_to_dict(creator)}
     except IntegrityError:
         db.rollback()
@@ -218,6 +231,18 @@ def update_creator(up_id: str, payload: dict, db: Session = Depends(get_db)):
         if stats:
             creator.view_count = int(stats.get("view_count", creator.view_count) or 0)
             creator.like_count = int(stats.get("like_count", creator.like_count) or 0)
+        # After refreshing profile, sync recent videos (30 days). New items inserted; existing updated.
+        try:
+            now = datetime.utcnow()
+            sync_creator_videos(db, creator, client, days_limit=30, now=now)
+            creator.last_checked_at = now
+            creator.last_success_at = now
+            creator.last_error_at = None
+            creator.last_error_msg = None
+        except Exception as exc:
+            creator.last_checked_at = datetime.utcnow()
+            creator.last_error_at = creator.last_checked_at
+            creator.last_error_msg = str(exc)
 
     db.add(creator)
     db.commit()

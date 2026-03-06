@@ -49,6 +49,7 @@ export default function ProductsPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     api.get('/api/tasks?page=1&page_size=200').then((res) => {
@@ -65,6 +66,7 @@ export default function ProductsPage() {
 
   const load = async () => {
     setLoading(true)
+    setError(null)
     const params = new URLSearchParams()
     if (taskIds.length > 0) params.set('task_ids', taskIds.join(','))
     if (keyword.trim()) params.set('keyword', keyword.trim())
@@ -76,10 +78,18 @@ export default function ProductsPage() {
     if (sortOrder) params.set('order', sortOrder)
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
-    const res = await api.get(`/api/products?${params.toString()}`)
-    setItems(res.data.items || [])
-    setTotal(res.data.total || 0)
-    setLoading(false)
+    try {
+      const res = await api.get(`/api/products?${params.toString()}`)
+      setItems(res.data.items || [])
+      setTotal(res.data.total || 0)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setItems([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -183,7 +193,8 @@ export default function ProductsPage() {
       </div>
 
       {loading && <Empty label='加载中...' />}
-      {!loading && items.length === 0 && <Empty label='暂无数据' />}
+      {error ? <Empty label={error} /> : null}
+      {!loading && !error && items.length === 0 && <Empty label='暂无数据' />}
       {!loading && items.length > 0 && (
         <div className='product-table'>
           <div className='product-table-head'>

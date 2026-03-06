@@ -2,16 +2,33 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
+import Empty from '../components/Empty'
 import './RunDetailPage.css'
 
 export default function RunDetailPage() {
   const { runId } = useParams()
   const navigate = useNavigate()
   const [run, setRun] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
-    const res = await api.get(`/api/runs/${runId}`)
-    setRun(res.data)
+    if (!runId) {
+      setError('缺少运行ID')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.get(`/api/runs/${runId}`)
+      setRun(res.data)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setRun(null)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -54,6 +71,22 @@ export default function RunDetailPage() {
       .filter(([key, value]) => !ignored.has(key) && value !== undefined && value !== null && value !== '')
       .map(([key, value]) => `${key}=${String(value)}`)
     return parts.join(' ')
+  }
+
+  if (loading) {
+    return (
+      <div className='page'>
+        <Empty label='加载中...' />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className='page'>
+        <Empty label={error} />
+      </div>
+    )
   }
 
   if (!run) return null

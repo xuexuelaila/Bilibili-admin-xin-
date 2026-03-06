@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
 import Pagination from '../components/Pagination'
@@ -24,15 +24,24 @@ export default function RunsPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (id) {
       setLoading(true)
-      api.get(`/api/tasks/${id}/runs?page=${page}&page_size=${pageSize}`).then((res) => {
-        setRuns(res.data.items)
-        setTotal(res.data.total || 0)
-        setLoading(false)
-      })
+      setError(null)
+      api.get(`/api/tasks/${id}/runs?page=${page}&page_size=${pageSize}`)
+        .then((res) => {
+          setRuns(res.data.items)
+          setTotal(res.data.total || 0)
+        })
+        .catch((err: any) => {
+          const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+          setError(message)
+          setRuns([])
+          setTotal(0)
+        })
+        .finally(() => setLoading(false))
     }
   }, [id, page, pageSize])
 
@@ -45,7 +54,8 @@ export default function RunsPage() {
         </div>
       </header>
       {loading && <Empty label='加载中...' />}
-      {!loading && runs.length === 0 && <Empty label='暂无运行记录' />}
+      {error ? <Empty label={error} /> : null}
+      {!loading && !error && runs.length === 0 && <Empty label='暂无运行记录' />}
       {!loading && (
         <div className='runs-table'>
         <div className='runs-header'>
@@ -65,7 +75,7 @@ export default function RunsPage() {
               <span className={`status ${run.status}`}>{run.status}</span>
             </div>
             <div className='run-actions'>
-              <a className='btn ghost' href={`/runs/${run.id}`}>查看详情</a>
+              <Link className='btn ghost' to={`/runs/${run.id}`}>查看详情</Link>
             </div>
             {(run.error_summary || run.error_detail) && (
               <details className='run-error'>

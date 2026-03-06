@@ -49,6 +49,6 @@ beat_schedule["sync-creator-watch"] = {
 
 celery_app.conf.update(
     task_track_started=True,
-    timezone="UTC",
+    timezone="Asia/Shanghai",
     beat_schedule=beat_schedule,
 )

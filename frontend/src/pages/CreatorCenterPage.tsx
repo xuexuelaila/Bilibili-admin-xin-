@@ -79,12 +79,33 @@ const statusOptions = [
   { value: 'dropped', label: '淘汰' },
 ]
 
+type TimePreset = '1d' | '3d' | '7d' | '3m' | '6m' | 'custom'
+
+const buildPresetRange = (preset: TimePreset, now = dayjs()) => {
+  const today = now.startOf('day')
+  const end = today.add(1, 'day')
+  let start = today.subtract(7, 'day')
+  if (preset === '1d') start = today.subtract(1, 'day')
+  if (preset === '3d') start = today.subtract(3, 'day')
+  if (preset === '7d') start = today.subtract(7, 'day')
+  if (preset === '3m') start = today.subtract(3, 'month')
+  if (preset === '6m') start = today.subtract(6, 'month')
+
+  return {
+    start: start.format('YYYY-MM-DDTHH:mm:ss'),
+    end: end.format('YYYY-MM-DDTHH:mm:ss'),
+    displayFrom: start.format('YYYY-MM-DD'),
+    displayTo: end.subtract(1, 'day').format('YYYY-MM-DD'),
+  }
+}
+
 export default function CreatorCenterPage() {
   const [creators, setCreators] = useState<Creator[]>([])
   const [creatorQ, setCreatorQ] = useState('')
   const [creatorGroup, setCreatorGroup] = useState('')
   const [creatorEnabled, setCreatorEnabled] = useState('')
   const [creatorLoading, setCreatorLoading] = useState(false)
+  const [refreshingProfiles, setRefreshingProfiles] = useState(false)
 
   const [selectedUps, setSelectedUps] = useState<string[]>([])
   const [focusUpId, setFocusUpId] = useState<string | null>(null)
@@ -100,9 +121,16 @@ export default function CreatorCenterPage() {
   const [newEnabled, setNewEnabled] = useState(true)
   const [creating, setCreating] = useState(false)
 
-  const [days, setDays] = useState<number | null>(7)
-  const [publishFrom, setPublishFrom] = useState('')
-  const [publishTo, setPublishTo] = useState('')
+  const defaultPreset: TimePreset = '7d'
+  const defaultRange = useMemo(() => buildPresetRange(defaultPreset), [])
+  const [timePreset, setTimePreset] = useState<TimePreset>(defaultPreset)
+  const [publishFrom, setPublishFrom] = useState(defaultRange.start)
+  const [publishTo, setPublishTo] = useState(defaultRange.end)
+  const [displayFrom, setDisplayFrom] = useState(defaultRange.displayFrom)
+  const [displayTo, setDisplayTo] = useState(defaultRange.displayTo)
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [draftFrom, setDraftFrom] = useState(defaultRange.displayFrom)
+  const [draftTo, setDraftTo] = useState(defaultRange.displayTo)
   const [bvidKeyword, setBvidKeyword] = useState('')
   const [titleKeyword, setTitleKeyword] = useState('')
   const [minFans, setMinFans] = useState('')
@@ -125,6 +153,9 @@ export default function CreatorCenterPage() {
   const [subtitleSearch, setSubtitleSearch] = useState('')
   const [subtitleMap, setSubtitleMap] = useState<Record<string, SubtitleState>>({})
   const [subtitleTab, setSubtitleTab] = useState<'text' | 'analysis'>('text')
+  const [subtitleProgress, setSubtitleProgress] = useState<Record<string, { progress: number; stage: string }>>({})
+  const [subtitleToast, setSubtitleToast] = useState<{ bvid: string; message: string } | null>(null)
+  const [subtitleCardVisible, setSubtitleCardVisible] = useState<Record<string, boolean>>({})
 
   const [frameModal, setFrameModal] = useState<string | null>(null)
   const [frameVideo, setFrameVideo] = useState<Video | null>(null)
@@ -171,15 +202,59 @@ export default function CreatorCenterPage() {
     window.setTimeout(() => setToast(null), 2000)
   }
 
+  const showSubtitleToast = (bvid: string, message: string) => {
+    setSubtitleToast({ bvid, message })
+    window.setTimeout(() => setSubtitleToast(null), 4000)
+  }
+
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const applyPreset = (preset: TimePreset) => {
+    const range = buildPresetRange(preset)
+    setTimePreset(preset)
+    setPublishFrom(range.start)
+    setPublishTo(range.end)
+    setDisplayFrom(range.displayFrom)
+    setDisplayTo(range.displayTo)
+    setShowDatePicker(false)
+  }
+
+  const openCustomPicker = () => {
+    setDraftFrom(displayFrom)
+    setDraftTo(displayTo)
+    setShowDatePicker(true)
+  }
+
+  const cancelCustomRange = () => {
+    setShowDatePicker(false)
+  }
+
+  const confirmCustomRange = () => {
+    if (!draftFrom || !draftTo) {
+      showToast('请选择开始与结束日期')
+      return
+    }
+    const start = dayjs(draftFrom).startOf('day')
+    const end = dayjs(draftTo).add(1, 'day').startOf('day')
+    if (end.isBefore(start)) {
+      showToast('结束日期不能早于开始日期')
+      return
+    }
+    setTimePreset('custom')
+    setPublishFrom(start.format('YYYY-MM-DDTHH:mm:ss'))
+    setPublishTo(end.format('YYYY-MM-DDTHH:mm:ss'))
+    setDisplayFrom(draftFrom)
+    setDisplayTo(draftTo)
+    setShowDatePicker(false)
+  }
 
   const effectiveUpIds = focusUpId ? [focusUpId] : selectedUps
 
   const { items: videos, total, loading } = useUpdates<Video>({
     upIds: effectiveUpIds,
-    days,
     publishFrom,
     publishTo,
+    publishToExclusive: true,
     bvid: bvidKeyword.trim(),
     title: titleKeyword.trim(),
     minFans,
@@ -213,17 +288,39 @@ export default function CreatorCenterPage() {
     }
   }
 
+  const refreshCreatorProfiles = async () => {
+    if (refreshingProfiles) return
+    const targets = creators.filter((c) => !c.avatar || !c.up_name || c.up_name === c.up_id)
+    if (targets.length === 0) {
+      showToast('暂无需要更新的UP主资料')
+      return
+    }
+    setRefreshingProfiles(true)
+    try {
+      await Promise.all(
+        targets.map((creator) => api.put(`/api/creators/${creator.up_id}`, { refresh_profile: true }))
+      )
+      await loadCreators()
+      showToast(`已刷新 ${targets.length} 个UP主资料`)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '刷新失败，请稍后重试'
+      showToast(message)
+    } finally {
+      setRefreshingProfiles(false)
+    }
+  }
+
   useEffect(() => {
     loadCreators()
   }, [creatorQ, creatorGroup, creatorEnabled])
 
   useEffect(() => {
     setPage(1)
-  }, [effectiveUpIds, days, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder])
+  }, [effectiveUpIds, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder])
 
   useEffect(() => {
     setSelectedVideos([])
-  }, [effectiveUpIds, days, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder, page, pageSize])
+  }, [effectiveUpIds, publishFrom, publishTo, bvidKeyword, titleKeyword, minFans, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => {
     if (!frameJob?.id) return
@@ -270,9 +367,7 @@ export default function CreatorCenterPage() {
   const clearSelectedUps = () => setSelectedUps([])
 
   const canClearStreamFilters =
-    days !== 7 ||
-    !!publishFrom ||
-    !!publishTo ||
+    timePreset !== defaultPreset ||
     !!bvidKeyword ||
     !!titleKeyword ||
     !!minFans ||
@@ -280,9 +375,7 @@ export default function CreatorCenterPage() {
     sortOrder !== 'desc'
 
   const clearStreamFilters = () => {
-    setDays(7)
-    setPublishFrom('')
-    setPublishTo('')
+    applyPreset(defaultPreset)
     setBvidKeyword('')
     setTitleKeyword('')
     setMinFans('')
@@ -357,6 +450,13 @@ export default function CreatorCenterPage() {
     }))
   }
 
+  const updateSubtitleProgress = (bvid: string, progress: number, stage: string) => {
+    setSubtitleProgress((prev) => ({
+      ...prev,
+      [bvid]: { progress, stage },
+    }))
+  }
+
   const fetchSubtitle = async (bvid: string) => {
     try {
       const res = await api.get(`/api/videos/${bvid}/subtitle`)
@@ -379,8 +479,10 @@ export default function CreatorCenterPage() {
   const SUBTITLE_POLL_MAX_MS = 10 * 60 * 1000
 
   const pollSubtitle = async (bvid: string) => {
-    const startAt = Date.now()
-    while (Date.now() - startAt < SUBTITLE_POLL_MAX_MS) {
+    const startedAt = Date.now()
+    const current = subtitleProgress[bvid]?.progress || 0
+    updateSubtitleProgress(bvid, Math.max(current, 10), '准备中')
+    while (Date.now() - startedAt < SUBTITLE_POLL_MAX_MS) {
       try {
         const res = await api.get(`/api/videos/${bvid}/subtitle`)
         const status = (res.data?.status || 'none') as SubtitleState['status']
@@ -391,6 +493,18 @@ export default function CreatorCenterPage() {
           errorDetail: res.data?.error_detail || '',
           updatedAt: res.data?.updated_at || '',
         })
+        const elapsed = Date.now() - startedAt
+        if (status === 'extracting') {
+          if (elapsed < 30_000) {
+            updateSubtitleProgress(bvid, Math.min(20 + (elapsed / 30_000) * 20, 40), '识别中')
+          } else if (elapsed < 90_000) {
+            updateSubtitleProgress(bvid, Math.min(40 + (elapsed - 30_000) / 60_000 * 40, 80), '识别中')
+          } else if (elapsed < 120_000) {
+            updateSubtitleProgress(bvid, Math.min(80 + (elapsed - 90_000) / 30_000 * 15, 95), '生成中')
+          } else {
+            updateSubtitleProgress(bvid, 96, '保存中')
+          }
+        }
         if (status === 'done') return res.data?.text || ''
         if (status === 'failed') throw new Error(res.data?.error || '字幕提取失败')
       } catch {
@@ -407,16 +521,20 @@ export default function CreatorCenterPage() {
       return await pollSubtitle(bvid)
     }
     updateSubtitleState(bvid, { status: 'extracting', error: '', errorDetail: '' })
+    updateSubtitleProgress(bvid, 5, '准备中')
     await api.post(`/api/videos/${bvid}/subtitle/extract`)
     try {
       const text = await pollSubtitle(bvid)
+      updateSubtitleProgress(bvid, 100, '完成')
       return text || ''
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('超时')) {
         updateSubtitleState(bvid, { status: 'extracting', error: '提取耗时较长，可点击“刷新状态”查看进度' })
+        updateSubtitleProgress(bvid, Math.min(subtitleProgress[bvid]?.progress || 90, 95), '保存中')
       } else {
         updateSubtitleState(bvid, { status: 'failed' })
+        updateSubtitleProgress(bvid, 0, '失败')
       }
     }
     return ''
@@ -754,24 +872,6 @@ export default function CreatorCenterPage() {
     })
   }
 
-  const applyQuickDays = (value: number | null) => {
-    setDays(value)
-    if (value !== null) {
-      setPublishFrom('')
-      setPublishTo('')
-    }
-  }
-
-  const updateFrom = (value: string) => {
-    setPublishFrom(value)
-    setDays(null)
-  }
-
-  const updateTo = (value: string) => {
-    setPublishTo(value)
-    setDays(null)
-  }
-
   const downloadCover = (bvid: string) => {
     const url = `${baseUrl}/api/videos/${bvid}/cover/download`
     window.open(url, '_blank')
@@ -829,9 +929,6 @@ export default function CreatorCenterPage() {
           <h1>UP主中心</h1>
           <p>左侧管理关注UP主，右侧查看更新流。</p>
         </div>
-        <div className='creator-header-actions'>
-          <button className='btn ghost' onClick={refresh} disabled={loading}>刷新</button>
-        </div>
       </header>
 
       <section className='creator-center-body'>
@@ -839,7 +936,9 @@ export default function CreatorCenterPage() {
           <div className='creator-panel-header'>
             <div className='creator-panel-title'>关注UP主</div>
             <div className='creator-panel-actions'>
-              <button className='btn ghost small' onClick={loadCreators}>刷新</button>
+              <button className='btn ghost small' onClick={refreshCreatorProfiles} disabled={refreshingProfiles}>
+                {refreshingProfiles ? '刷新中...' : '刷新资料'}
+              </button>
               <button className='btn ghost small weak' onClick={clearCreatorFilters}>清空筛选</button>
               <button className='btn small primary' onClick={() => setShowAdd(true)}>+ 添加UP主</button>
             </div>
@@ -890,7 +989,7 @@ export default function CreatorCenterPage() {
           </div>
 
           {creatorLoading ? <div className='muted'>加载中...</div> : null}
-          {!creatorLoading && creators.length === 0 ? <Empty text='暂无关注UP主' /> : null}
+          {!creatorLoading && creators.length === 0 ? <Empty label='暂无关注UP主' /> : null}
 
           <div className='creator-list'>
             {creators.map((creator) => {
@@ -987,11 +1086,16 @@ export default function CreatorCenterPage() {
               <div className='filter-block span-5'>
                 <label>时间</label>
                 <div className='segmented'>
-                  <button className={days === 1 ? 'active' : ''} onClick={() => applyQuickDays(1)}>24h</button>
-                  <button className={days === 3 ? 'active' : ''} onClick={() => applyQuickDays(3)}>3天</button>
-                  <button className={days === 7 ? 'active' : ''} onClick={() => applyQuickDays(7)}>7天</button>
-                  <button className={days === null ? 'active' : ''} onClick={() => applyQuickDays(null)}>自定义</button>
+                  <button className={timePreset === '1d' ? 'active' : ''} onClick={() => applyPreset('1d')}>24h</button>
+                  <button className={timePreset === '3d' ? 'active' : ''} onClick={() => applyPreset('3d')}>3天</button>
+                  <button className={timePreset === '7d' ? 'active' : ''} onClick={() => applyPreset('7d')}>7天</button>
+                  <button className={timePreset === '3m' ? 'active' : ''} onClick={() => applyPreset('3m')}>近3个月</button>
+                  <button className={timePreset === '6m' ? 'active' : ''} onClick={() => applyPreset('6m')}>近半年</button>
+                  <button className={timePreset === 'custom' ? 'active' : ''} onClick={openCustomPicker}>自定义</button>
                 </div>
+                {timePreset === 'custom' && displayFrom && displayTo && (
+                  <div className='time-range-preview'>已选：{displayFrom} 至 {displayTo}</div>
+                )}
               </div>
               <div className='filter-block span-4'>
                 <label>排序</label>
@@ -1009,7 +1113,7 @@ export default function CreatorCenterPage() {
               </div>
             </div>
 
-            <div className={`filters-grid row-2 ${days === null ? 'with-range' : ''}`}>
+            <div className='filters-grid row-2'>
               <div className='filter-block span-bvid'>
                 <label>BVID</label>
                 <input
@@ -1037,18 +1141,30 @@ export default function CreatorCenterPage() {
                   placeholder='例如 1000'
                 />
               </div>
-              {days === null && (
-                <div className='filter-block span-range'>
-                  <label>日期范围</label>
-                  <div className='date-range-inline'>
-                    <input type='date' value={publishFrom} onChange={(e) => updateFrom(e.target.value)} />
-                    <span>至</span>
-                    <input type='date' value={publishTo} onChange={(e) => updateTo(e.target.value)} />
-                  </div>
-                </div>
-              )}
             </div>
           </div>
+
+          {showDatePicker && (
+            <div className='date-range-modal' onClick={cancelCustomRange}>
+              <div className='date-range-card' onClick={(e) => e.stopPropagation()}>
+                <div className='date-range-title'>选择日期范围</div>
+                <div className='date-range-fields'>
+                  <div className='date-field'>
+                    <label>开始日期</label>
+                    <input type='date' value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)} />
+                  </div>
+                  <div className='date-field'>
+                    <label>结束日期</label>
+                    <input type='date' value={draftTo} onChange={(e) => setDraftTo(e.target.value)} />
+                  </div>
+                </div>
+                <div className='date-range-actions'>
+                  <button className='btn ghost' onClick={cancelCustomRange}>取消</button>
+                  <button className='btn primary' onClick={confirmCustomRange}>确定</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {selectedVideos.length > 0 && (
             <div className='bulk-bar'>
@@ -1074,7 +1190,7 @@ export default function CreatorCenterPage() {
           )}
 
           {loading ? <div className='muted'>加载中...</div> : null}
-          {!loading && videoList.length === 0 ? <Empty text='暂无更新内容，尝试调整筛选或刷新列表' /> : null}
+          {!loading && videoList.length === 0 ? <Empty label='暂无更新内容，尝试调整筛选或刷新列表' /> : null}
 
           <div className='creator-grid'>
             {videoList.map((video) => (
@@ -1131,15 +1247,69 @@ export default function CreatorCenterPage() {
                       <span className='tag-text'>标签：{video.labels.join(' / ')}</span>
                     </div>
                   )}
-                  <div className='video-actions'>
-                    <button
-                      className='btn ghost'
-                      onClick={() => openSubtitleModal(video.bvid)}
-                      disabled={subtitleMap[video.bvid]?.status === 'extracting'}
-                      title='打开字幕弹窗'
-                    >
-                      字幕
-                    </button>
+                  <div
+                    className='video-actions'
+                    ref={(el) => {
+                      if (!el) return
+                      if ((el as any)._subtitleObserverAttached) return
+                      ;(el as any)._subtitleObserverAttached = true
+                      const card = el.closest('.creator-card') as HTMLElement | null
+                      if (!card) return
+                      const bvid = (card.querySelector('.subtitle-actions') as HTMLElement | null)?.dataset?.bvid
+                      if (!bvid) return
+                      const observer = new IntersectionObserver((entries) => {
+                        const visible = entries.some((entry) => entry.isIntersecting)
+                        setSubtitleCardVisible((prev) => ({ ...prev, [bvid]: visible }))
+                      }, { threshold: 0.35 })
+                      observer.observe(card)
+                    }}
+                  >
+                    <div className='subtitle-actions' data-bvid={video.bvid}>
+                      <button
+                        className='btn ghost'
+                        onClick={async () => {
+                          const status = subtitleMap[video.bvid]?.status || 'none'
+                          if (status === 'extracting') return
+                          if (status === 'done') {
+                            setSubtitleModal(video.bvid)
+                            setSubtitleSearch('')
+                            setSubtitleTab('text')
+                            return
+                          }
+                          const text = await startExtractSubtitle(video.bvid)
+                          const inView = subtitleCardVisible[video.bvid]
+                          if (text) {
+                            if (inView) {
+                              setSubtitleModal(video.bvid)
+                              setSubtitleSearch('')
+                              setSubtitleTab('text')
+                            } else {
+                              showSubtitleToast(video.bvid, '字幕提取完成')
+                            }
+                          }
+                        }}
+                        title='提取字幕'
+                      >
+                        字幕
+                      </button>
+                      {subtitleMap[video.bvid]?.status === 'extracting' && (
+                        <div className='subtitle-progress'>
+                          <div className='progress-meta'>
+                            <span>{subtitleProgress[video.bvid]?.stage || '提取中'}</span>
+                            <span>{Math.round(subtitleProgress[video.bvid]?.progress || 0)}%</span>
+                          </div>
+                          <div className='progress-bar'>
+                            <span style={{ width: `${subtitleProgress[video.bvid]?.progress || 0}%` }} />
+                          </div>
+                        </div>
+                      )}
+                      {subtitleMap[video.bvid]?.status === 'failed' && (
+                        <div className='subtitle-error-inline'>
+                          <span>提取失败</span>
+                          <button className='btn ghost small' onClick={() => startExtractSubtitle(video.bvid)}>重试</button>
+                        </div>
+                      )}
+                    </div>
                     <button className='btn ghost' onClick={() => openTagModal(video)}>编辑标签</button>
                     <button className='btn ghost' onClick={() => openFrameModal(video)}>帧文件夹</button>
                     <button className='btn ghost' onClick={() => downloadCover(video.bvid)}>封面海报</button>
@@ -1608,6 +1778,22 @@ export default function CreatorCenterPage() {
         </div>
       )}
 
+      {subtitleToast && (
+        <div className='toast subtitle-toast'>
+          <span>{subtitleToast.message}</span>
+          <button
+            className='btn ghost small'
+            onClick={() => {
+              setSubtitleModal(subtitleToast.bvid)
+              setSubtitleSearch('')
+              setSubtitleTab('text')
+              setSubtitleToast(null)
+            }}
+          >
+            查看
+          </button>
+        </div>
+      )}
       {toast && <div className='toast'>{toast}</div>}
     </div>
   )

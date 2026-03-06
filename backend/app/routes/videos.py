@@ -41,6 +41,7 @@ def list_videos(
     tags: str | None = None,
     publish_from: str | None = None,
     publish_to: str | None = None,
+    publish_to_exclusive: bool | None = None,
     fetch_from: str | None = None,
     fetch_to: str | None = None,
     min_views: int | None = None,
@@ -121,9 +122,20 @@ def list_videos(
         query = query.where(or_(*conditions))
 
     if publish_from:
-        query = query.where(Video.publish_time >= datetime.fromisoformat(publish_from))
+        try:
+            publish_from_dt = datetime.fromisoformat(publish_from)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid publish_from")
+        query = query.where(Video.publish_time >= publish_from_dt)
     if publish_to:
-        query = query.where(Video.publish_time <= datetime.fromisoformat(publish_to))
+        try:
+            publish_to_dt = datetime.fromisoformat(publish_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid publish_to")
+        if publish_to_exclusive:
+            query = query.where(Video.publish_time < publish_to_dt)
+        else:
+            query = query.where(Video.publish_time <= publish_to_dt)
     if days is not None:
         try:
             cutoff = datetime.utcnow() - timedelta(days=int(days))
@@ -131,9 +143,17 @@ def list_videos(
         except Exception:
             pass
     if fetch_from:
-        query = query.where(Video.fetch_time >= datetime.fromisoformat(fetch_from))
+        try:
+            fetch_from_dt = datetime.fromisoformat(fetch_from)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid fetch_from")
+        query = query.where(Video.fetch_time >= fetch_from_dt)
     if fetch_to:
-        query = query.where(Video.fetch_time <= datetime.fromisoformat(fetch_to))
+        try:
+            fetch_to_dt = datetime.fromisoformat(fetch_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid fetch_to")
+        query = query.where(Video.fetch_time <= fetch_to_dt)
 
     if min_views is not None:
         query = query.where(Video.views >= min_views)
@@ -581,7 +601,7 @@ def batch_cover_download(bvids: str, db: Session = Depends(get_db)):
             folder = _pick_task_folder(v.source_task_ids or [], task_map)
             filename = f"{folder}/{v.bvid}{ext}"
             try:
-                res = httpx.get(url, timeout=10, headers=_cover_headers())
+                res = httpx.get(url, timeout=10, headers=_cover_headers(), follow_redirects=True)
                 if res.status_code == 200:
                     zf.writestr(filename, res.content)
                 else:
@@ -670,7 +690,7 @@ def view_cover(bvid: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="cover not found")
     url = _normalize_cover_url(video.cover_url)
     try:
-        res = httpx.get(url, timeout=10, headers=_cover_headers())
+        res = httpx.get(url, timeout=10, headers=_cover_headers(), follow_redirects=True)
         if res.status_code != 200:
             raise HTTPException(status_code=502, detail="cover download failed")
         return StreamingResponse(
@@ -782,7 +802,7 @@ def download_cover(bvid: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="cover not found")
     url = _normalize_cover_url(video.cover_url)
     try:
-        res = httpx.get(url, timeout=10, headers=_cover_headers())
+        res = httpx.get(url, timeout=10, headers=_cover_headers(), follow_redirects=True)
         if res.status_code != 200:
             raise HTTPException(status_code=502, detail="cover download failed")
         return StreamingResponse(

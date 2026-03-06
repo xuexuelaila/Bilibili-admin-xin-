@@ -3,9 +3,10 @@ import { api } from '../api/client'
 
 export type UpdateFilters = {
   upIds: string[]
-  days: number | null
+  days?: number | null
   publishFrom: string
   publishTo: string
+  publishToExclusive?: boolean
   processStatus?: string
   bvid?: string
   title?: string
@@ -35,9 +36,10 @@ export function useUpdates<T = any>(filters: UpdateFilters, refreshToken = 0) {
     const params = new URLSearchParams()
     params.set('source', 'creator_watch')
     if (filters.upIds.length) params.set('up_ids', filters.upIds.join(','))
-    if (filters.days) params.set('days', String(filters.days))
     if (filters.publishFrom) params.set('publish_from', filters.publishFrom)
     if (filters.publishTo) params.set('publish_to', filters.publishTo)
+    if (filters.publishToExclusive) params.set('publish_to_exclusive', 'true')
+    if (!filters.publishFrom && !filters.publishTo && filters.days) params.set('days', String(filters.days))
     if (filters.processStatus && filters.processStatus !== 'all') params.set('process_status', filters.processStatus)
     if (filters.bvid) params.set('bvid', filters.bvid)
     if (filters.title) params.set('title', filters.title)

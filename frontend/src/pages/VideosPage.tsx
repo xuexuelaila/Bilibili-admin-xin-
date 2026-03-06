@@ -88,6 +88,7 @@ export default function VideosPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [coverError, setCoverError] = useState<Record<string, boolean>>({})
   const [subtitleModal, setSubtitleModal] = useState<string | null>(null)
@@ -121,6 +122,7 @@ export default function VideosPage() {
 
   const load = async () => {
     setLoading(true)
+    setError(null)
     const params = new URLSearchParams()
     if (labels.length > 0) params.set('tags', labels.join(','))
     if (publishFrom) params.set('publish_from', publishFrom)
@@ -134,10 +136,18 @@ export default function VideosPage() {
     if (sortOrder) params.set('order', sortOrder)
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
-    const res = await api.get(`/api/videos?${params.toString()}`)
-    setVideos(res.data.items)
-    setTotal(res.data.total || 0)
-    setLoading(false)
+    try {
+      const res = await api.get(`/api/videos?${params.toString()}`)
+      setVideos(res.data.items)
+      setTotal(res.data.total || 0)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setVideos([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -1018,7 +1028,8 @@ export default function VideosPage() {
       )}
 
       {loading && <Empty label='加载中...' />}
-      {!loading && videos.length === 0 && <Empty label='暂无数据' />}
+      {error ? <Empty label={error} /> : null}
+      {!loading && !error && videos.length === 0 && <Empty label='暂无数据' />}
       {!loading && videos.length > 0 && (
         <section className='video-grid'>
           {videos.map((v) => (

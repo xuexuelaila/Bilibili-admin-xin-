@@ -360,6 +360,62 @@ class CrawlerBiliClient(BiliClient):
 
         return results[: int(limit)]
 
+    def get_creator_videos_recent(self, up_id: str, days_limit: int = 30) -> list[dict[str, Any]]:
+        if not up_id:
+            return []
+        page_size = 50
+        page = 1
+        results: list[dict[str, Any]] = []
+        wbi_url = "https://api.bilibili.com/x/space/wbi/arc/search"
+        fallback_url = "https://api.bilibili.com/x/space/arc/search"
+        cutoff = datetime.utcnow() - timedelta(days=int(days_limit))
+
+        while True:
+            params = {"mid": up_id, "pn": page, "ps": page_size, "order": "pubdate"}
+            data = self._request_json_wbi(wbi_url, params) or self._request_json(fallback_url, params)
+            if not data or data.get("code") not in (0, None):
+                break
+            payload = data.get("data") if isinstance(data, dict) else {}
+            if not isinstance(payload, dict):
+                break
+            listing = payload.get("list") if isinstance(payload.get("list"), dict) else {}
+            vlist = listing.get("vlist") if isinstance(listing, dict) else []
+            if not isinstance(vlist, list) or not vlist:
+                break
+
+            stop = False
+            for item in vlist:
+                if not isinstance(item, dict):
+                    continue
+                publish_time = _parse_time(item.get("created"))
+                if publish_time and publish_time < cutoff:
+                    stop = True
+                    break
+                results.append(
+                    {
+                        "bvid": item.get("bvid") or "",
+                        "title": _strip_html(item.get("title") or ""),
+                        "up_id": str(item.get("mid") or up_id),
+                        "up_name": item.get("author") or "",
+                        "publish_time": publish_time,
+                        "cover_url": _normalize_url(item.get("pic")),
+                        "stats": {
+                            "views": int(item.get("play", 0) or 0),
+                            "like": int(item.get("like", 0) or 0),
+                            "fav": int(item.get("favorite", 0) or 0),
+                            "coin": int(item.get("coin", 0) or 0),
+                            "reply": int(item.get("comment", 0) or 0),
+                            "share": int(item.get("share", 0) or 0),
+                        },
+                    }
+                )
+
+            if stop or len(vlist) < page_size:
+                break
+            page += 1
+
+        return results
+
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         for attempt in range(self.retry_times + 1):
             try:

@@ -43,6 +43,9 @@ class BiliClient:
     def get_creator_videos(self, up_id: str, limit: int = 20) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def get_creator_videos_recent(self, up_id: str, days_limit: int = 30) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
 
 class MockBiliClient(BiliClient):
     def search_videos(self, keyword: str, days_limit: int, fetch_limit: int, search_sort: str, partitions=None):
@@ -76,4 +79,7 @@ class MockBiliClient(BiliClient):
         return []
 
     def get_creator_videos(self, up_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        return []
+
+    def get_creator_videos_recent(self, up_id: str, days_limit: int = 30) -> list[dict[str, Any]]:
         return []

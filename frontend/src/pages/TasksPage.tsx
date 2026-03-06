@@ -77,6 +77,7 @@ export default function TasksPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [summaryMap, setSummaryMap] = useState<Record<string, TaskSummary>>({})
   const [runningMap, setRunningMap] = useState<Record<string, number>>({})
   const timersRef = useRef<Record<string, number>>({})
@@ -88,25 +89,36 @@ export default function TasksPage() {
 
   const load = async () => {
     setLoading(true)
-    const [taskRes, metricsRes] = await Promise.all([
-      api.get(`/api/tasks?page=${page}&page_size=${pageSize}&status=${status}&q=${encodeURIComponent(q)}`),
-      api.get('/api/metrics/overview'),
-    ])
-    setTasks(taskRes.data.items)
-    setTotal(taskRes.data.total || 0)
-    setMetrics(metricsRes.data)
-    const ids = (taskRes.data.items || []).map((t: Task) => t.id).join(',')
-    if (ids) {
-      const summaryRes = await api.get(`/api/tasks/summary?ids=${ids}`)
-      const map: Record<string, TaskSummary> = {}
-      ;(summaryRes.data.items || []).forEach((item: TaskSummary) => {
-        map[item.task_id] = item
-      })
-      setSummaryMap(map)
-    } else {
+    setError(null)
+    try {
+      const [taskRes, metricsRes] = await Promise.all([
+        api.get(`/api/tasks?page=${page}&page_size=${pageSize}&status=${status}&q=${encodeURIComponent(q)}`),
+        api.get('/api/metrics/overview'),
+      ])
+      setTasks(taskRes.data.items)
+      setTotal(taskRes.data.total || 0)
+      setMetrics(metricsRes.data)
+      const ids = (taskRes.data.items || []).map((t: Task) => t.id).join(',')
+      if (ids) {
+        const summaryRes = await api.get(`/api/tasks/summary?ids=${ids}`)
+        const map: Record<string, TaskSummary> = {}
+        ;(summaryRes.data.items || []).forEach((item: TaskSummary) => {
+          map[item.task_id] = item
+        })
+        setSummaryMap(map)
+      } else {
+        setSummaryMap({})
+      }
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setTasks([])
+      setTotal(0)
+      setMetrics(null)
       setSummaryMap({})
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -279,7 +291,8 @@ export default function TasksPage() {
         </div>
 
         {loading && <Empty label='加载中...' />}
-        {!loading && tasks.length === 0 && <Empty label='暂无任务' />}
+        {error ? <Empty label={error} /> : null}
+        {!loading && !error && tasks.length === 0 && <Empty label='暂无任务' />}
         {!loading && tasks.map((task) => (
           <div key={task.id} className='task-card'>
             <div className='task-top'>

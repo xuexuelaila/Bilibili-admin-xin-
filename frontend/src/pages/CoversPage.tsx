@@ -64,6 +64,7 @@ export function CoversPanel({ showHeader = true }: { showHeader?: boolean }) {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
   const [layoutFilter, setLayoutFilter] = useState<string>('')
   const [keyword, setKeyword] = useState('')
@@ -86,6 +87,7 @@ export function CoversPanel({ showHeader = true }: { showHeader?: boolean }) {
 
   const load = async () => {
     setLoading(true)
+    setError(null)
     const params = new URLSearchParams()
     if (categoryFilter.length > 0) params.set('category', categoryFilter.join(','))
     if (layoutFilter) params.set('layout_type', layoutFilter)
@@ -94,10 +96,18 @@ export function CoversPanel({ showHeader = true }: { showHeader?: boolean }) {
     if (sortOrder) params.set('order', sortOrder)
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
-    const res = await api.get(`/api/covers/favorites?${params.toString()}`)
-    setItems(res.data.items || [])
-    setTotal(res.data.total || 0)
-    setLoading(false)
+    try {
+      const res = await api.get(`/api/covers/favorites?${params.toString()}`)
+      setItems(res.data.items || [])
+      setTotal(res.data.total || 0)
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || '加载失败，请稍后重试'
+      setError(message)
+      setItems([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -251,7 +261,8 @@ export function CoversPanel({ showHeader = true }: { showHeader?: boolean }) {
       </div>
 
       {loading && <div className='empty'>加载中...</div>}
-      {!loading && items.length === 0 && <div className='empty'>暂无收藏封面</div>}
+      {error ? <div className='empty'>{error}</div> : null}
+      {!loading && !error && items.length === 0 && <div className='empty'>暂无收藏封面</div>}
       {!loading && items.length > 0 && (
         <section className='cover-grid'>
           {items.map((item) => (
