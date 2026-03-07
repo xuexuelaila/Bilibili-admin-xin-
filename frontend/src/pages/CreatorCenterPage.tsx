@@ -80,6 +80,17 @@ const statusOptions = [
 ]
 
 type TimePreset = '1d' | '3d' | '7d' | '3m' | '6m' | 'custom'
+type RefreshJobStatus = 'running' | 'success' | 'failed'
+
+type RefreshJob = {
+  id: string
+  label: string
+  status: RefreshJobStatus
+  progress: number
+  detail?: string
+  startedAt: string
+  endedAt?: string
+}
 
 const buildPresetRange = (preset: TimePreset, now = dayjs()) => {
   const today = now.startOf('day')
@@ -131,6 +142,8 @@ export default function CreatorCenterPage() {
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [draftFrom, setDraftFrom] = useState(defaultRange.displayFrom)
   const [draftTo, setDraftTo] = useState(defaultRange.displayTo)
+  const [refreshJobs, setRefreshJobs] = useState<RefreshJob[]>([])
+  const [refreshStreamJob, setRefreshStreamJob] = useState<{ id: string; started: boolean } | null>(null)
   const [bvidKeyword, setBvidKeyword] = useState('')
   const [titleKeyword, setTitleKeyword] = useState('')
   const [minFans, setMinFans] = useState('')
@@ -208,6 +221,33 @@ export default function CreatorCenterPage() {
   }
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const startRefreshJob = (label: string, detail?: string) => {
+    const id = `job_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const job: RefreshJob = {
+      id,
+      label,
+      status: 'running',
+      progress: 5,
+      detail,
+      startedAt: dayjs().format('HH:mm:ss'),
+    }
+    setRefreshJobs((prev) => [job, ...prev].slice(0, 6))
+    return id
+  }
+
+  const updateRefreshJob = (id: string, patch: Partial<RefreshJob>) => {
+    setRefreshJobs((prev) => prev.map((job) => (job.id === id ? { ...job, ...patch } : job)))
+  }
+
+  const finishRefreshJob = (id: string, ok: boolean, detail?: string) => {
+    updateRefreshJob(id, {
+      status: ok ? 'success' : 'failed',
+      progress: 100,
+      detail,
+      endedAt: dayjs().format('HH:mm:ss'),
+    })
+  }
 
   const applyPreset = (preset: TimePreset) => {
     const range = buildPresetRange(preset)
@@ -295,16 +335,35 @@ export default function CreatorCenterPage() {
       showToast('暂无需要更新的UP主资料')
       return
     }
+    const jobId = startRefreshJob('刷新资料', `0/${targets.length}`)
     setRefreshingProfiles(true)
     try {
-      await Promise.all(
-        targets.map((creator) => api.put(`/api/creators/${creator.up_id}`, { refresh_profile: true }))
+      let done = 0
+      let failed = 0
+      await Promise.allSettled(
+        targets.map((creator) =>
+          api.put(`/api/creators/${creator.up_id}`, { refresh_profile: true })
+            .catch(() => {
+              failed += 1
+            })
+            .finally(() => {
+              done += 1
+              const progress = Math.min(99, Math.max(5, Math.round((done / targets.length) * 100)))
+              updateRefreshJob(jobId, { progress, detail: `${done}/${targets.length}` })
+            })
+        )
       )
       await loadCreators()
+      if (failed > 0) {
+        finishRefreshJob(jobId, false, `成功 ${targets.length - failed} / 失败 ${failed}`)
+      } else {
+        finishRefreshJob(jobId, true, `已刷新 ${targets.length}`)
+      }
       showToast(`已刷新 ${targets.length} 个UP主资料`)
     } catch (err: any) {
       const message = err?.response?.data?.detail || '刷新失败，请稍后重试'
       showToast(message)
+      finishRefreshJob(jobId, false, '刷新失败')
     } finally {
       setRefreshingProfiles(false)
     }
@@ -365,6 +424,20 @@ export default function CreatorCenterPage() {
 
   const clearFocus = () => setFocusUpId(null)
   const clearSelectedUps = () => setSelectedUps([])
+
+  useEffect(() => {
+    if (!refreshStreamJob) return
+    if (!refreshStreamJob.started) {
+      if (loading) {
+        setRefreshStreamJob({ id: refreshStreamJob.id, started: true })
+      }
+      return
+    }
+    if (!loading) {
+      finishRefreshJob(refreshStreamJob.id, true, '刷新完成')
+      setRefreshStreamJob(null)
+    }
+  }, [loading, refreshStreamJob])
 
   const canClearStreamFilters =
     timePreset !== defaultPreset ||
@@ -1077,7 +1150,16 @@ export default function CreatorCenterPage() {
               )}
             </div>
             <div className='stream-actions'>
-              <button className='btn small ghost' onClick={refresh}>刷新列表</button>
+              <button
+                className='btn small ghost'
+                onClick={() => {
+                  const id = startRefreshJob('更新流刷新')
+                  setRefreshStreamJob({ id, started: false })
+                  refresh()
+                }}
+              >
+                刷新列表
+              </button>
             </div>
           </div>
 
@@ -1143,6 +1225,38 @@ export default function CreatorCenterPage() {
               </div>
             </div>
           </div>
+
+          {refreshJobs.length > 0 && (
+            <div className='refresh-progress'>
+              <div className='refresh-progress-title'>刷新进度</div>
+              <div className='refresh-progress-table'>
+                <div className='refresh-progress-head'>
+                  <span>操作</span>
+                  <span>进度</span>
+                  <span>状态</span>
+                  <span>开始</span>
+                  <span>结束</span>
+                </div>
+                {refreshJobs.map((job) => {
+                  const statusLabel = job.status === 'running' ? '进行中' : job.status === 'success' ? '完成' : '失败'
+                  return (
+                    <div key={job.id} className={`refresh-progress-row ${job.status}`}>
+                      <span>{job.label}{job.detail ? ` · ${job.detail}` : ''}</span>
+                      <span className='progress-cell'>
+                        <span className='progress-track'>
+                          <span className='progress-fill' style={{ width: `${job.progress}%` }} />
+                        </span>
+                        <span className='progress-text'>{job.progress}%</span>
+                      </span>
+                      <span className={`status ${job.status}`}>{statusLabel}</span>
+                      <span>{job.startedAt}</span>
+                      <span>{job.endedAt || '-'}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {showDatePicker && (
             <div className='date-range-modal' onClick={cancelCustomRange}>

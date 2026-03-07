@@ -223,6 +223,16 @@ def refresh_all_videos():
     return {"job_id": job.id, "async": True}
 
 
+@router.post("/run_all")
+def run_all_tasks(db: Session = Depends(get_db)):
+    tasks = db.execute(select(Task).where(Task.status == "enabled")).scalars().all()
+    task_ids = []
+    for task in tasks:
+        celery_run_task.delay(task.id, trigger="manual_batch")
+        task_ids.append(task.id)
+    return {"queued": len(task_ids), "task_ids": task_ids, "async": True}
+
+
 @router.post("/{task_id}/dry-run")
 def dry_run(task_id: str, db: Session = Depends(get_db), limit: int = 20):
     task = db.get(Task, task_id)

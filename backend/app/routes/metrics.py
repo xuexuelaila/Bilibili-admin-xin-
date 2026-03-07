@@ -34,6 +34,7 @@ def overview(db: Session = Depends(get_db)):
     success_rate = 0 if total_runs == 0 else round(success_runs / total_runs * 100, 2)
 
     last_run_time = db.execute(select(func.max(Run.end_at))).scalar()
+    last_refresh_time = db.execute(select(func.max(Video.fetch_time))).scalar()
 
     return {
         "today_new_videos": int(today_new or 0),
@@ -42,6 +43,7 @@ def overview(db: Session = Depends(get_db)):
         "failed_tasks": int(failed_tasks or 0),
         "success_rate": success_rate,
         "last_run_time": last_run_time,
+        "last_refresh_time": last_refresh_time,
     }
 
 

@@ -35,6 +35,7 @@ interface Metrics {
   failed_tasks: number
   success_rate: number
   last_run_time: string | null
+  last_refresh_time: string | null
 }
 
 interface PreviewSample {
@@ -56,6 +57,18 @@ interface PreviewResult {
     failed_items: number
   }
   samples: PreviewSample[]
+}
+
+type RefreshJobStatus = 'running' | 'success' | 'failed'
+
+type RefreshJob = {
+  id: string
+  label: string
+  status: RefreshJobStatus
+  progress: number
+  detail?: string
+  startedAt: string
+  endedAt?: string
 }
 
 function InfoTip({ text }: { text: string }) {
@@ -84,6 +97,8 @@ export default function TasksPage() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [tagOptions, setTagOptions] = useState<string[]>([])
   const [refreshingAll, setRefreshingAll] = useState(false)
+  const [runningAll, setRunningAll] = useState(false)
+  const [refreshJobs, setRefreshJobs] = useState<RefreshJob[]>([])
   const basicHotTip = '爆款=命中基础爆款规则。默认：播放>=100000 或 收藏>=1500 或 投币>=500 或 评论>=200。以任务规则为准。'
   const lowFanTip = '低粉爆款=命中低粉规则。默认：粉丝<=50000、播放>=30000、收藏率>=0.012、投币率>=0.0025、评论率>=0.002、收藏/粉丝>=0.02（需全部满足）。以任务规则为准。'
 
@@ -128,6 +143,33 @@ export default function TasksPage() {
   useEffect(() => {
     api.get('/api/tags').then((res) => setTagOptions(res.data.items || [])).catch(() => {})
   }, [])
+
+  const startRefreshJob = (label: string, detail?: string) => {
+    const id = `job_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const job: RefreshJob = {
+      id,
+      label,
+      status: 'running',
+      progress: 5,
+      detail,
+      startedAt: dayjs().format('HH:mm:ss'),
+    }
+    setRefreshJobs((prev) => [job, ...prev].slice(0, 6))
+    return id
+  }
+
+  const updateRefreshJob = (id: string, patch: Partial<RefreshJob>) => {
+    setRefreshJobs((prev) => prev.map((job) => (job.id === id ? { ...job, ...patch } : job)))
+  }
+
+  const finishRefreshJob = (id: string, ok: boolean, detail?: string) => {
+    updateRefreshJob(id, {
+      status: ok ? 'success' : 'failed',
+      progress: 100,
+      detail,
+      endedAt: dayjs().format('HH:mm:ss'),
+    })
+  }
 
   const search = () => {
     setPage(1)
@@ -175,14 +217,37 @@ export default function TasksPage() {
 
   const refreshAllVideos = async () => {
     if (refreshingAll) return
+    const jobId = startRefreshJob('一键刷新视频')
     setRefreshingAll(true)
     try {
       await api.post('/api/tasks/refresh_all')
       window.alert('已触发“全量刷新”，后台正在更新视频数据。')
+      finishRefreshJob(jobId, true, '后台刷新中')
     } catch {
       window.alert('触发失败，请稍后重试。')
+      finishRefreshJob(jobId, false, '触发失败')
     } finally {
       setRefreshingAll(false)
+    }
+  }
+
+  const runAllTasks = async () => {
+    if (runningAll) return
+    const jobId = startRefreshJob('一键启动任务')
+    setRunningAll(true)
+    try {
+      const res = await api.post('/api/tasks/run_all')
+      const queued = Number(res.data?.queued || 0)
+      if (queued > 0) {
+        finishRefreshJob(jobId, true, `已触发 ${queued} 个任务`)
+      } else {
+        finishRefreshJob(jobId, false, '无启用任务')
+      }
+    } catch {
+      window.alert('触发失败，请稍后重试。')
+      finishRefreshJob(jobId, false, '触发失败')
+    } finally {
+      setRunningAll(false)
     }
   }
 
@@ -237,12 +302,47 @@ export default function TasksPage() {
           <p>每天定时抓取并筛选爆款/低粉带货爆款。</p>
         </div>
         <div className='header-actions'>
+          <button className='btn ghost' onClick={runAllTasks} disabled={runningAll}>
+            {runningAll ? '启动中...' : '一键启动任务'}
+          </button>
           <button className='btn ghost' onClick={refreshAllVideos} disabled={refreshingAll}>
             {refreshingAll ? '刷新中...' : '一键刷新视频'}
           </button>
           <Link to='/tasks/new' className='btn primary'>新建任务</Link>
         </div>
       </header>
+
+      {refreshJobs.length > 0 && (
+        <section className='refresh-progress'>
+          <div className='refresh-progress-title'>刷新进度</div>
+          <div className='refresh-progress-table'>
+            <div className='refresh-progress-head'>
+              <span>操作</span>
+              <span>进度</span>
+              <span>状态</span>
+              <span>开始</span>
+              <span>结束</span>
+            </div>
+            {refreshJobs.map((job) => {
+              const statusLabel = job.status === 'running' ? '进行中' : job.status === 'success' ? '完成' : '失败'
+              return (
+                <div key={job.id} className={`refresh-progress-row ${job.status}`}>
+                  <span>{job.label}{job.detail ? ` · ${job.detail}` : ''}</span>
+                  <span className='progress-cell'>
+                    <span className='progress-track'>
+                      <span className='progress-fill' style={{ width: `${job.progress}%` }} />
+                    </span>
+                    <span className='progress-text'>{job.progress}%</span>
+                  </span>
+                  <span className={`status ${job.status}`}>{statusLabel}</span>
+                  <span>{job.startedAt}</span>
+                  <span>{job.endedAt || '-'}</span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {metrics && (
         <section className='metrics'>
@@ -275,6 +375,10 @@ export default function TasksPage() {
           <div className='metric-card'>
             <span>最近运行</span>
             <strong>{metrics.last_run_time ? dayjs(metrics.last_run_time).format('MM-DD HH:mm') : '-'}</strong>
+          </div>
+          <div className='metric-card'>
+            <span>最近刷新</span>
+            <strong>{metrics.last_refresh_time ? dayjs(metrics.last_refresh_time).format('MM-DD HH:mm') : '-'}</strong>
           </div>
         </section>
       )}
