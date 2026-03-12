@@ -468,34 +468,44 @@ export default function VideosPage() {
     const current = subtitleProgress[bvid]?.progress || 0
     updateSubtitleProgress(bvid, Math.max(current, 10), '准备中')
     for (let i = 0; i < attempts; i++) {
+      let res: any
       try {
-        const res = await api.get(`/api/videos/${bvid}/subtitle`)
-        const status = (res.data?.status || 'none') as SubtitleState['status']
-        updateSubtitleState(bvid, {
-          status,
-          text: res.data?.text || '',
-          error: res.data?.error_summary || res.data?.error || '',
-          errorDetail: res.data?.error_detail || '',
-          updatedAt: res.data?.updated_at || '',
-        })
-        const elapsed = Date.now() - startedAt
-        if (status === 'extracting') {
-          if (elapsed < 30_000) {
-            updateSubtitleProgress(bvid, Math.min(20 + (elapsed / 30_000) * 20, 40), '识别中')
-          } else if (elapsed < 90_000) {
-            updateSubtitleProgress(bvid, Math.min(40 + (elapsed - 30_000) / 60_000 * 40, 80), '识别中')
-          } else if (elapsed < 120_000) {
-            updateSubtitleProgress(bvid, Math.min(80 + (elapsed - 90_000) / 30_000 * 15, 95), '生成中')
-          } else {
-            updateSubtitleProgress(bvid, 96, '保存中')
-          }
-        }
-        if (status === 'done') return res.data?.text || ''
-        if (status === 'failed') throw new Error(res.data?.error || '字幕提取失败')
+        res = await api.get(`/api/videos/${bvid}/subtitle`)
       } catch {
-        // keep polling
+        await wait(interval)
+        continue
       }
+      const status = (res.data?.status || 'none') as SubtitleState['status']
+      updateSubtitleState(bvid, {
+        status,
+        text: res.data?.text || '',
+        error: res.data?.error_summary || res.data?.error || '',
+        errorDetail: res.data?.error_detail || '',
+        updatedAt: res.data?.updated_at || '',
+      })
+      const elapsed = Date.now() - startedAt
+      if (status === 'extracting') {
+        if (elapsed < 30_000) {
+          updateSubtitleProgress(bvid, Math.min(20 + (elapsed / 30_000) * 20, 40), '识别中')
+        } else if (elapsed < 90_000) {
+          updateSubtitleProgress(bvid, Math.min(40 + (elapsed - 30_000) / 60_000 * 40, 80), '识别中')
+        } else if (elapsed < 120_000) {
+          updateSubtitleProgress(bvid, Math.min(80 + (elapsed - 90_000) / 30_000 * 15, 95), '生成中')
+        } else {
+          updateSubtitleProgress(bvid, 96, '保存中')
+        }
+      }
+      if (status === 'done') return res.data?.text || ''
+      if (status === 'failed') throw new Error(res.data?.error || '字幕提取失败')
       await wait(interval)
+    }
+    const latest = await fetchSubtitle(bvid)
+    if (latest?.status === 'done') {
+      updateSubtitleProgress(bvid, 100, '完成')
+      return latest.text || ''
+    }
+    if (latest?.status === 'failed') {
+      throw new Error(latest?.error || '字幕提取失败')
     }
     throw new Error('字幕提取超时')
   }
@@ -515,9 +525,8 @@ export default function VideosPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('超时')) {
-        // Keep showing extracting; the backend job may still be running.
-        updateSubtitleState(bvid, { status: 'extracting' })
-        updateSubtitleProgress(bvid, Math.min(subtitleProgress[bvid]?.progress || 90, 95), '保存中')
+        updateSubtitleState(bvid, { status: 'failed', error: '字幕提取超时，请检查 worker 是否运行后重试' })
+        updateSubtitleProgress(bvid, 0, '超时')
       } else {
         updateSubtitleState(bvid, { status: 'failed' })
         updateSubtitleProgress(bvid, 0, '失败')
