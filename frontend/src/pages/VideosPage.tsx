@@ -1415,7 +1415,7 @@ export default function VideosPage() {
                   )}
                 </div>
               )}
-              {frameJob && !showFrameConfig && (
+              {frameJob && !showFrameConfig && frameJob.status !== 'success' && (
                 <div className='frame-progress'>
                   <div className='progress-row'>
                     <span>状态：{frameStatusLabel(frameJob.status)}</span>
