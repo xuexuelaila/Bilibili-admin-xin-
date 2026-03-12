@@ -167,7 +167,7 @@
 .progress-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
 .progress-meta { font-size: 12px; color: var(--muted); }
 .frame-error { color: #8a1f1f; background: #fff2f2; border: 1px solid #f3c0c0; padding: 8px 10px; border-radius: 10px; font-size: 12px; }
-.frame-section { background: #fff; }
+.frame-section { background: #fff; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 .frame-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .frame-tabs { display: flex; gap: 8px; }
 .frame-tabs .btn.small.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
@@ -175,7 +175,16 @@
 .frame-bulk-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
 .frame-bulk-left { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .frame-bulk-actions { display: flex; align-items: center; gap: 8px; }
-.frame-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-content: start; background: #fff; }
+.frame-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-content: start; place-content: start; background: #fff; }
+.frame-modal .frame-modal-body,
+.frame-modal .frame-section,
+.frame-modal .frame-toolbar,
+.frame-modal .frame-bulk-bar,
+.frame-modal .frame-grid,
+.frame-modal .frame-pagination,
+.frame-modal .frame-empty {
+  background: #fff !important;
+}
 .frame-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-soft); position: relative; padding: 0; cursor: pointer; }
 .frame-card img { width: 100%; height: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
 .frame-time { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; }
