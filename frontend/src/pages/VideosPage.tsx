@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
 import { CoversPanel } from './CoversPage'
@@ -114,6 +114,7 @@ export default function VideosPage() {
   const [frameOnlyFavorited, setFrameOnlyFavorited] = useState(false)
   const [frameSelected, setFrameSelected] = useState<string[]>([])
   const [showFrameConfig, setShowFrameConfig] = useState(false)
+  const frameModalBodyRef = useRef<HTMLDivElement | null>(null)
   const [tagModal, setTagModal] = useState<Video | null>(null)
   const [tagDraft, setTagDraft] = useState<string[]>([])
   const [tagSaving, setTagSaving] = useState(false)
@@ -182,6 +183,11 @@ export default function VideosPage() {
   useEffect(() => {
     setFrameSelected([])
   }, [frameItems])
+
+  useEffect(() => {
+    if (!frameModal) return
+    frameModalBodyRef.current?.scrollTo({ top: 0 })
+  }, [frameModal, showFrameConfig, frameJob?.status])
 
   const allSelected = videos.length > 0 && selected.length === videos.length
 
@@ -1346,7 +1352,7 @@ export default function VideosPage() {
                 <button className='btn ghost' onClick={closeFrameModal}>关闭</button>
               </div>
             </header>
-            <div className='frame-modal-body'>
+            <div className='frame-modal-body' ref={frameModalBodyRef}>
               {showFrameConfig && (
                 <div className='frame-config'>
                   <div className='config-row'>
@@ -1409,7 +1415,7 @@ export default function VideosPage() {
                   )}
                 </div>
               )}
-              {frameJob && (
+              {frameJob && !showFrameConfig && (
                 <div className='frame-progress'>
                   <div className='progress-row'>
                     <span>状态：{frameStatusLabel(frameJob.status)}</span>
@@ -1434,8 +1440,8 @@ export default function VideosPage() {
                   )}
                 </div>
               )}
-              {frameJob?.status === 'success' && (
-                <>
+              {frameJob?.status === 'success' && !showFrameConfig && (
+                <div className='frame-section'>
                   <div className='frame-toolbar'>
                     <div className='frame-tabs'>
                       <button
@@ -1537,7 +1543,7 @@ export default function VideosPage() {
                       </button>
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
           </div>
