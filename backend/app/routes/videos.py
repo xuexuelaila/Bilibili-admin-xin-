@@ -558,6 +558,9 @@ def batch_extract_subtitles(payload: dict, db: Session = Depends(get_db)):
         if subtitle and subtitle.status == "done" and subtitle.text and not force:
             skipped += 1
             continue
+        if subtitle and subtitle.status == "extracting" and not force:
+            skipped += 1
+            continue
         if not subtitle:
             subtitle = Subtitle(bvid=bvid, status="extracting")
         subtitle.status = "extracting"
@@ -772,6 +775,8 @@ def extract_subtitle(bvid: str, db: Session = Depends(get_db), force: bool = Fal
     subtitle = db.get(Subtitle, bvid)
     if subtitle and subtitle.status == "done" and subtitle.text and not force:
         return {"status": "done", "queued": False}
+    if subtitle and subtitle.status == "extracting" and not force:
+        return {"status": "extracting", "queued": False}
     if not subtitle:
         subtitle = Subtitle(bvid=bvid, status="extracting")
     subtitle.status = "extracting"
