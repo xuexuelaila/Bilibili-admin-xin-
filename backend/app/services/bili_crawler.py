@@ -214,15 +214,18 @@ class CrawlerBiliClient(BiliClient):
         detail = self.get_video_detail(bvid)
         cid = detail.get("cid")
         if not cid:
-            return None
+            cid = self._get_cid_by_pagelist(bvid)
+        if not cid:
+            # Fallback: try parse playinfo from video page directly.
+            return self._get_audio_url_from_page(bvid)
         url = "https://api.bilibili.com/x/player/playurl"
-        params = {"bvid": bvid, "cid": cid, "fnval": 16}
+        params = {"bvid": bvid, "cid": cid, "fnval": 16, "fnver": 0, "fourk": 1}
         data = self._request_json(url, params)
         if not data:
-            return None
+            return self._get_audio_url_from_page(bvid)
         payload = data.get("data") if isinstance(data, dict) else {}
         if not isinstance(payload, dict):
-            return None
+            return self._get_audio_url_from_page(bvid)
         dash = payload.get("dash")
         if isinstance(dash, dict):
             audios = dash.get("audio") if isinstance(dash.get("audio"), list) else []
@@ -237,7 +240,7 @@ class CrawlerBiliClient(BiliClient):
             first = durl[0]
             if isinstance(first, dict):
                 return first.get("url")
-        return None
+        return self._get_audio_url_from_page(bvid)
 
     def get_video_url(self, bvid: str) -> str | None:
         detail = self.get_video_detail(bvid)
@@ -481,6 +484,43 @@ class CrawlerBiliClient(BiliClient):
             time.sleep(self.min_interval - elapsed)
         self._last_request = time.time()
 
+    def _get_cid_by_pagelist(self, bvid: str) -> int | None:
+        data = self._request_json("https://api.bilibili.com/x/player/pagelist", {"bvid": bvid})
+        if not data or data.get("code") not in (0, None):
+            return None
+        rows = data.get("data")
+        if not isinstance(rows, list) or not rows:
+            return None
+        first = rows[0]
+        if not isinstance(first, dict):
+            return None
+        cid = first.get("cid")
+        return int(cid) if isinstance(cid, (int, float, str)) and str(cid).isdigit() else None
+
+    def _get_audio_url_from_page(self, bvid: str) -> str | None:
+        text = self._request_text(f"https://www.bilibili.com/video/{bvid}")
+        if not text:
+            return None
+        playinfo = _extract_playinfo(text)
+        if not isinstance(playinfo, dict):
+            return None
+        data = playinfo.get("data") if isinstance(playinfo.get("data"), dict) else {}
+        dash = data.get("dash") if isinstance(data, dict) else {}
+        if isinstance(dash, dict):
+            audios = dash.get("audio") if isinstance(dash.get("audio"), list) else []
+            for audio in audios:
+                if not isinstance(audio, dict):
+                    continue
+                base_url = audio.get("baseUrl") or audio.get("base_url")
+                if base_url:
+                    return str(base_url)
+        durl = data.get("durl") if isinstance(data, dict) else None
+        if isinstance(durl, list) and durl:
+            first = durl[0]
+            if isinstance(first, dict) and first.get("url"):
+                return str(first.get("url"))
+        return None
+
     def _search_by_html(
         self,
         keyword: str,
@@ -634,6 +674,36 @@ def _extract_next_data(text: str) -> dict[str, Any] | None:
 
 def _extract_initial_state(text: str) -> dict[str, Any] | None:
     marker = "window.__INITIAL_STATE__"
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    idx = text.find("=", idx)
+    if idx == -1:
+        return None
+    start = text.find("{", idx)
+    if start == -1:
+        return None
+    depth = 0
+    end = None
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        return None
+    raw = text[start:end]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _extract_playinfo(text: str) -> dict[str, Any] | None:
+    marker = "window.__playinfo__"
     idx = text.find(marker)
     if idx == -1:
         return None
